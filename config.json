@@ -1,0 +1,58 @@
+{
+  "app": {
+    "name": "Nexus AI Orchestrator",
+    "version": "1.0.0",
+    "default_zoom": 0.75,
+    "storage_root": "~/.nexus_orchestrator"
+  },
+  "platforms": {
+    "claude": {
+      "name": "Claude",
+      "home_url": "https://claude.ai/new",
+      "url_chat_pattern": "https://claude.ai/chat/",
+      "selectors": {
+        "input_box": "div[contenteditable='true']",
+        "send_button": "button[aria-label='Send Message'], button[aria-label='Send message']",
+        "stop_button": "button[aria-label='Stop response']",
+        "rate_limit_indicators": [
+          "out of messages until",
+          "reached your message limit",
+          "message limit reached"
+        ]
+      },
+      "auto_resume_prompt": "Continue where you left off. Use files if you created any."
+    },
+    "chatgpt": {
+      "name": "ChatGPT",
+      "home_url": "https://chatgpt.com/",
+      "url_chat_pattern": "https://chatgpt.com/c/",
+      "selectors": {
+        "input_box": "#prompt-textarea, div[contenteditable='true']",
+        "send_button": "button[data-testid='send-button'], button[aria-label='Send prompt']",
+        "stop_button": "button[data-testid='stop-button']",
+        "rate_limit_indicators": [
+          "you've hit the plus limit",
+          "you have hit your message limit",
+          "try again after"
+        ]
+      },
+      "auto_resume_prompt": "Continue where you left off. Use files if you created any."
+    },
+    "gemini": {
+      "name": "Gemini",
+      "home_url": "https://gemini.google.com/app",
+      "url_chat_pattern": "https://gemini.google.com/app/",
+      "selectors": {
+        "input_box": "rich-textarea div[contenteditable='true'], div.ql-editor[contenteditable='true']",
+        "send_button": "button[aria-label='Send message'], button.send-button",
+        "stop_button": "button[aria-label='Stop generating']",
+        "rate_limit_indicators": [
+          "you've reached the limit",
+          "please try again later",
+          "rate limit exceeded"
+        ]
+      },
+      "auto_resume_prompt": "Continue where you left off. Use files if you created any."
+    }
+  }
+}
