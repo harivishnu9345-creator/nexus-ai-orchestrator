@@ -1,15 +1,10 @@
-"""
-Task Scheduler Module
-Manages a background queue of automated prompts based on target AM/PM times.
-"""
-
 import uuid
 from typing import Dict, Any, List, Optional
 from PyQt6.QtCore import QObject, pyqtSignal, QTimer, QTime, QDateTime
 
 class TaskScheduler(QObject):
-    task_due = pyqtSignal(dict)           
-    queue_updated = pyqtSignal(list)      
+    task_due = pyqtSignal(dict)
+    queue_updated = pyqtSignal(list)
 
     def __init__(self, parent: Optional[QObject] = None):
         super().__init__(parent)
@@ -41,10 +36,17 @@ class TaskScheduler(QObject):
             return True
         return False
 
+    def clear_completed(self) -> None:
+        to_delete = [tid for tid, t in self._queue.items() if t["status"] in ("success", "failed")]
+        for tid in to_delete:
+            del self._queue[tid]
+        self._emit_queue_update()
+
     def update_task_status(self, task_id: str, status: str, cooldown_time: Optional[str] = None) -> None:
         if task_id in self._queue:
             self._queue[task_id]["status"] = status
-            if cooldown_time: self._queue[task_id]["cooldown_time"] = cooldown_time
+            if cooldown_time:
+                self._queue[task_id]["cooldown_time"] = cooldown_time
             self._emit_queue_update()
 
     def get_all_tasks(self) -> List[Dict[str, Any]]:
@@ -53,13 +55,17 @@ class TaskScheduler(QObject):
         return tasks
 
     def _check_queue(self) -> None:
+        # Turnstile serialization: wait if a task is currently mid-injection
+        if any(t["status"] == "running" for t in self._queue.values()):
+            return
+
         current_time = QTime.currentTime()
         for task_id, task in self._queue.items():
-            if task["status"] == "queued":
-                if current_time >= task["target_time"]:
-                    task["status"] = "running"
-                    self.task_due.emit(task)
-                    self._emit_queue_update()
+            if task["status"] == "queued" and current_time >= task["target_time"]:
+                task["status"] = "running"
+                self.task_due.emit(task)
+                self._emit_queue_update()
+                break  # Dispatch one task per tick to protect OS clipboard focus
 
     def _emit_queue_update(self) -> None:
         self.queue_updated.emit(self.get_all_tasks())

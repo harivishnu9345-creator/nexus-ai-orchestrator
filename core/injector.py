@@ -1,15 +1,9 @@
-"""
-DOM Injector Module
-Uses native system clipboard (MIME Data) and Paste actions to bypass React security,
-allowing seamless file uploads before injecting text.
-"""
-
 import json
 import os
 from typing import Any, Callable, Dict, Optional
 from PyQt6.QtWebEngineCore import QWebEnginePage
-from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore import QUrl, QMimeData, QTimer
+from PyQt6.QtGui import QGuiApplication
+from PyQt6.QtCore import QMimeData, QUrl, QTimer
 
 class DOMInjector:
     def __init__(self, config_path: Optional[str] = None):
@@ -22,8 +16,10 @@ class DOMInjector:
     def _load_config(self, path: str) -> Dict[str, Any]:
         if os.path.isfile(path):
             try:
-                with open(path, "r", encoding="utf-8") as f: return json.load(f)
-            except Exception: pass
+                with open(path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                pass
         return {"platforms": {}}
 
     def get_platform_config(self, platform: str) -> Dict[str, Any]:
@@ -31,72 +27,103 @@ class DOMInjector:
 
     def send_prompt(
         self, page: QWebEnginePage, platform: str, prompt_text: str,
-        file_path: Optional[str] = None, callback: Optional[Callable[[Dict[str, Any]], None]] = None
+        file_path: Optional[str] = None, main_hwnd: Optional[int] = None,
+        view: Optional[Any] = None,
+        callback: Optional[Callable[[Dict[str, Any]], None]] = None
     ) -> None:
-        
         p_cfg = self.get_platform_config(platform)
         selectors = p_cfg.get("selectors", {})
         input_selector = selectors.get("input_box", "div[contenteditable='true'], textarea")
-        send_selector = selectors.get("send_button", "button[type='submit']")
 
         def _handle_result(result):
             if callback:
-                if isinstance(result, dict): callback(result)
-                else: callback({"success": False, "raw": result})
-
-        # Core JS to type text and hit send
-        js_type_and_send = f"""
-        (function() {{
-            try {{
-                const inputSel = {json.dumps(input_selector)};
-                const sendSel = {json.dumps(send_selector)};
-                const prompt = {json.dumps(prompt_text)};
-
-                const el = document.querySelector(inputSel);
-                if (!el) return {{ success: false, error: "Input not found" }};
-
-                el.focus();
-                if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') {{
-                    el.value = prompt;
-                    el.dispatchEvent(new Event('input', {{ bubbles: true, cancelable: true }}));
-                    el.dispatchEvent(new Event('change', {{ bubbles: true, cancelable: true }}));
-                }} else {{
-                    el.innerHTML = '<p>' + prompt.replace(/\\n/g, '<br>') + '</p>';
-                    el.dispatchEvent(new Event('input', {{ bubbles: true, cancelable: true }}));
-                }}
-
-                setTimeout(() => {{
-                    const btn = document.querySelector(sendSel);
-                    if (btn && !btn.disabled) btn.click();
-                    else el.dispatchEvent(new KeyboardEvent('keydown', {{ key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }}));
-                }}, 300);
-                
-                return {{ success: true }};
-            }} catch (e) {{
-                return {{ success: false, error: e.toString() }};
-            }}
-        }})();
-        """
+                if isinstance(result, dict):
+                    callback(result)
+                else:
+                    callback({"success": False, "raw": result})
 
         if file_path and os.path.exists(file_path):
-            # 1. Copy the file into the System Clipboard as MIME Data
-            clipboard = QApplication.clipboard()
+            print("[INJECTOR] File detected. Activating pane and targeting chat bar.")
+
+            # STEP 1: Load file into Native OS Clipboard
             mime = QMimeData()
             mime.setUrls([QUrl.fromLocalFile(file_path)])
-            clipboard.setMimeData(mime)
+            QGuiApplication.clipboard().setMimeData(mime)
 
-            # 2. Focus the input box via JS
-            focus_js = f"document.querySelector({json.dumps(input_selector)}).focus();"
+            # STEP 2: Force Qt physical focus onto the target QWebEngineView pane
+            if view is not None:
+                view.setFocus()
 
-            def on_focused(res):
-                # 3. Simulate Ctrl+V (Native Paste) directly into the focused element
+            # STEP 3: Simulate a mouse click on the chat bar to wake React state
+            js_click_bar = f"""
+            (function() {{
+                const el = document.querySelector({json.dumps(input_selector)});
+                if (!el) return false;
+                el.dispatchEvent(new MouseEvent('mousedown', {{ bubbles: true, cancelable: true }}));
+                el.focus();
+                el.dispatchEvent(new MouseEvent('mouseup', {{ bubbles: true, cancelable: true }}));
+                el.click();
+                if (el.classList.contains("ql-blank")) el.classList.remove("ql-blank");
+                document.execCommand("selectAll", false, null);
+                document.execCommand("delete", false, null);
+                return true;
+            }})();
+            """
+
+            def on_clicked(success):
+                if not success:
+                    print("[INJECTOR] Failed to find chat bar to click.")
+                    return _handle_result({"success": False, "error": "Chat bar not found"})
+
+                if view is not None:
+                    view.setFocus()
+
+                # STEP 4: Fire native paste now that both View and DOM are focused
                 page.triggerAction(QWebEnginePage.WebAction.Paste)
-                
-                # 4. Wait 3.5 seconds for the platform to upload the file, then type prompt
-                # QTimer prevents blocking the UI thread while we wait
-                QTimer.singleShot(3500, lambda: page.runJavaScript(js_type_and_send, _handle_result))
 
-            page.runJavaScript(focus_js, on_focused)
+                # STEP 5: Wait 5 seconds for React file pill render, then append prompt and send
+                def finish_typing():
+                    js_finish = f"""
+                    (function() {{
+                        const el = document.querySelector({json.dumps(input_selector)});
+                        if (!el) return {{ success: false, error: "Input lost focus" }};
+                        el.focus();
+                        document.execCommand("insertText", false, {json.dumps(prompt_text)});
+                        el.dispatchEvent(new Event('input', {{ bubbles: true, cancelable: true }}));
+                        setTimeout(() => {{
+                            const btn = document.querySelector('button[aria-label*="Send" i]:not([disabled]), button[data-testid="send-button"]:not([disabled])');
+                            if (btn) btn.click();
+                            else el.dispatchEvent(new KeyboardEvent('keydown', {{ key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true, cancelable: true, composed: true }}));
+                        }}, 500);
+                        return {{ success: true }};
+                    }})();
+                    """
+                    page.runJavaScript(js_finish, _handle_result)
+
+                QTimer.singleShot(5000, finish_typing)
+
+            page.runJavaScript(js_click_bar, lambda res: QTimer.singleShot(250, lambda: on_clicked(res)))
+
         else:
-            # If no file, just run the prompt injection normally
+            print("[INJECTOR] No file attached. Using fast JS injection.")
+            js_type_and_send = f"""
+            (function() {{
+                try {{
+                    const el = document.querySelector({json.dumps(input_selector)});
+                    if (!el) return {{ success: false, error: "Input not found" }};
+                    el.focus();
+                    if (el.classList.contains("ql-blank")) el.classList.remove("ql-blank");
+                    document.execCommand("selectAll", false, null);
+                    document.execCommand("delete", false, null);
+                    document.execCommand("insertText", false, {json.dumps(prompt_text)});
+                    el.dispatchEvent(new Event('input', {{ bubbles: true, cancelable: true }}));
+                    setTimeout(() => {{
+                        const btn = document.querySelector('button[aria-label*="Send" i]:not([disabled]), button[data-testid="send-button"]:not([disabled])');
+                        if (btn) btn.click();
+                        else el.dispatchEvent(new KeyboardEvent('keydown', {{ key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true, cancelable: true, composed: true }}));
+                    }}, 400);
+                    return {{ success: true }};
+                }} catch (e) {{ return {{ success: false, error: e.toString() }}; }}
+            }})();
+            """
             page.runJavaScript(js_type_and_send, _handle_result)

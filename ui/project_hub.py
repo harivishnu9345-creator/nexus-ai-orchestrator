@@ -1,13 +1,9 @@
-"""
-Project Hub UI Module
-Displays saved projects on startup so existing workspaces and chat URLs are restored.
-"""
-
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
-    QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+    QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QFrame
 )
+
 
 class ProjectHubDialog(QDialog):
     open_project = pyqtSignal(dict)
@@ -16,48 +12,86 @@ class ProjectHubDialog(QDialog):
     def __init__(self, projects: list, parent=None):
         super().__init__(parent)
         self.projects = projects
-        self.setWindowTitle("Nexus AI Orchestrator — Project Hub")
-        self.resize(700, 420)
+        self.setWindowTitle("Nexus AI Orchestrator — Workspace Manager")
+        self.resize(720, 440)
         self._setup_ui()
 
     def _setup_ui(self):
         self.setStyleSheet("""
-            QDialog { background-color: #09090b; color: #f4f4f5; font-family: 'Segoe UI', sans-serif; }
-            QLabel { color: #e4e4e7; font-size: 13px; }
-            QTableWidget {
-                background-color: #18181b; color: #d4d4d8; border: 1px solid #27272a;
-                border-radius: 6px; font-size: 12px;
+            QDialog {
+                background-color: #dcdad5;
+                color: #2e3436;
+                font-family: 'Ubuntu', 'Cantarell', 'DejaVu Sans', 'Segoe UI', sans-serif;
             }
-            QHeaderView::section { background-color: #27272a; color: #ffffff; padding: 6px; border: none; font-weight: bold; }
-            QPushButton { background-color: #27272a; color: #ffffff; border: none; border-radius: 4px; padding: 8px 16px; font-weight: bold; }
-            QPushButton:hover { background-color: #3f3f46; }
-            QPushButton#primaryBtn { background-color: #7c3aed; }
-            QPushButton#primaryBtn:hover { background-color: #6d28d9; }
+            QLabel {
+                color: #2e3436;
+                font-size: 12px;
+            }
+            QTableWidget {
+                background-color: #ffffff;
+                alternate-background-color: #f6f5f4;
+                color: #2e3436;
+                border: 1px solid #a7a59f;
+                gridline-color: #d3d0c9;
+                font-size: 12px;
+            }
+            QHeaderView::section {
+                background-color: #e8e6e3;
+                color: #2e3436;
+                padding: 5px;
+                border: none;
+                border-right: 1px solid #b5b2ac;
+                border-bottom: 1px solid #a7a59f;
+                font-weight: bold;
+            }
+            QPushButton {
+                background-color: #f4f3f1;
+                color: #2e3436;
+                border: 1px solid #a7a59f;
+                border-radius: 3px;
+                padding: 6px 14px;
+                font-weight: bold;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #ffffff;
+            }
+            QPushButton#primaryBtn {
+                background-color: #5a8e3e;
+                color: #ffffff;
+                border: 1px solid #46712f;
+            }
+            QPushButton#primaryBtn:hover {
+                background-color: #689d4a;
+            }
         """)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(14)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(12)
 
-        header = QHBoxLayout()
-        title = QLabel("Saved Project Workspaces")
-        title.setStyleSheet("font-size: 18px; font-weight: bold; color: #ffffff;")
-        
-        btn_new = QPushButton("+ New Project")
+        header_frame = QFrame()
+        header_frame.setStyleSheet("background-color: #2e3436; border-radius: 3px; padding: 6px;")
+        header = QHBoxLayout(header_frame)
+        title = QLabel("Saved Swarm Workspaces")
+        title.setStyleSheet("font-size: 15px; font-weight: bold; color: #ffffff;")
+
+        btn_new = QPushButton("+ New Workspace")
         btn_new.setObjectName("primaryBtn")
         btn_new.clicked.connect(self._on_new)
-        
+
         header.addWidget(title)
         header.addStretch()
         header.addWidget(btn_new)
-        layout.addLayout(header)
+        layout.addWidget(header_frame)
 
         self.table = QTableWidget(0, 3)
-        self.table.setHorizontalHeaderLabels(["Project Name", "Accounts Linked", "Actions"])
+        self.table.setAlternatingRowColors(True)
+        self.table.setHorizontalHeaderLabels(["Workspace Name", "Configured Nodes", "Action"])
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
-        self.table.setColumnWidth(2, 130)
+        self.table.setColumnWidth(2, 140)
         self.table.verticalHeader().setVisible(False)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         layout.addWidget(self.table, stretch=1)
@@ -70,10 +104,12 @@ class ProjectHubDialog(QDialog):
             name_item = QTableWidgetItem(proj.get("name", "Untitled"))
             acc_list = proj.get("accounts", [])
             providers = ", ".join([a.get("platform", "").capitalize() for a in acc_list])
-            acc_item = QTableWidgetItem(f"{len(acc_list)} accounts ({providers})")
-            
-            btn_open = QPushButton("Open Workspace")
-            btn_open.setStyleSheet("padding: 4px 8px; font-size: 11px; background-color: #7c3aed;")
+            acc_item = QTableWidgetItem(f"{len(acc_list)} nodes ({providers})")
+
+            btn_open = QPushButton("Load Workspace")
+            btn_open.setStyleSheet(
+                "padding: 3px 8px; font-size: 11px; background-color: #3584e4; color: #ffffff; border: 1px solid #1b6acb;"
+            )
             btn_open.clicked.connect(lambda _, p=proj: self._on_open(p))
 
             self.table.setItem(row, 0, name_item)

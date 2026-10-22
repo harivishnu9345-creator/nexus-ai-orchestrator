@@ -1,12 +1,11 @@
-"""
-Web Pane UI Module
-Defines individual AI account pane with God-Mode File Interceptor subclass.
-"""
 import os
 from PyQt6.QtCore import QUrl, Qt, pyqtSignal
-from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame, QSizePolicy)
+from PyQt6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame, QSizePolicy
+)
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebEngineCore import QWebEngineProfile, QWebEnginePage
+
 
 class AutoUploadPage(QWebEnginePage):
     def __init__(self, profile, parent=None):
@@ -20,10 +19,14 @@ class AutoUploadPage(QWebEnginePage):
             return [file_to_upload]
         return super().chooseFiles(mode, oldFiles, acceptedMimeTypes)
 
-class AIPane(QWidget):
-    url_changed = pyqtSignal(str, str) 
 
-    def __init__(self, account_id: str, account_name: str, provider: str, profile: QWebEngineProfile, start_url: str, default_zoom: float = 0.75, parent=None):
+class AIPane(QWidget):
+    url_changed = pyqtSignal(str, str)
+
+    def __init__(
+        self, account_id: str, account_name: str, provider: str,
+        profile: QWebEngineProfile, start_url: str, default_zoom: float = 0.80, parent=None
+    ):
         super().__init__(parent)
         self.account_id = account_id
         self.account_name = account_name
@@ -31,7 +34,7 @@ class AIPane(QWidget):
         self.current_zoom = default_zoom
 
         self._setup_ui()
-        
+
         self.page = AutoUploadPage(profile, self.web_view)
         self.web_view.setPage(self.page)
         self.web_view.setZoomFactor(self.current_zoom)
@@ -40,43 +43,91 @@ class AIPane(QWidget):
 
     def _setup_ui(self):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.setMinimumSize(400, 400)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        self.setMinimumSize(460, 420)
+
+        outer_layout = QVBoxLayout(self)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.setSpacing(0)
+
+        self.container = QFrame()
+        self.container.setObjectName("PaneFrame")
+        self.container.setStyleSheet("""
+            QFrame#PaneFrame {
+                background-color: #ffffff;
+                border: 1px solid #9a9790;
+                border-radius: 2px;
+            }
+        """)
+        layout = QVBoxLayout(self.container)
+        layout.setContentsMargins(1, 1, 1, 1)
         layout.setSpacing(0)
 
+        # Classic Dark GTK Window Header Bar
         self.header = QFrame()
+        self.header.setFixedHeight(34)
         self.header.setStyleSheet("""
-            QFrame { background-color: #18181b; border-bottom: 1px solid #27272a; border-top-left-radius: 6px; border-top-right-radius: 6px; }
-            QLabel { color: #e4e4e7; font-family: 'Segoe UI', sans-serif; }
-            QPushButton { background: transparent; color: #a1a1aa; border: none; font-weight: bold; padding: 4px 8px; border-radius: 4px; }
-            QPushButton:hover { background-color: #27272a; color: #f4f4f5; }
+            QFrame {
+                background-color: #35393c;
+                border-bottom: 1px solid #1c1f21;
+            }
+            QLabel {
+                color: #eeeeec;
+                font-family: 'Ubuntu', 'DejaVu Sans', sans-serif;
+                border: none;
+            }
+            QPushButton {
+                background-color: #454a4d;
+                color: #eeeeec;
+                border: 1px solid #232629;
+                font-weight: bold;
+                padding: 2px 7px;
+                border-radius: 2px;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #565c60;
+                color: #ffffff;
+            }
+            QPushButton:pressed {
+                background-color: #2b2e30;
+            }
         """)
-        
+
         header_layout = QHBoxLayout(self.header)
-        header_layout.setContentsMargins(12, 8, 12, 8)
+        header_layout.setContentsMargins(8, 4, 8, 4)
+        header_layout.setSpacing(6)
 
         self.status_dot = QLabel("●")
-        self.status_dot.setStyleSheet("color: #22c55e; font-size: 14px;")
-        
-        self.title_label = QLabel(f"{self.account_name}  ·  {self.provider}")
-        self.title_label.setStyleSheet("font-size: 13px; font-weight: 600;")
-        
+        self.status_dot.setStyleSheet("color: #73d216; font-size: 13px;")
+
+        self.title_label = QLabel(f"{self.account_name} [{self.provider}]")
+        self.title_label.setStyleSheet("font-size: 12px; font-weight: bold;")
+
         self.url_label = QLabel("")
-        self.url_label.setStyleSheet("color: #71717a; font-size: 11px;")
+        self.url_label.setStyleSheet("""
+            background-color: #232629;
+            color: #babdb6;
+            font-family: 'DejaVu Sans Mono', 'Consolas', monospace;
+            font-size: 10px;
+            padding: 2px 6px;
+            border: 1px solid #181a1c;
+            border-radius: 2px;
+        """)
 
         self.btn_zoom_out = QPushButton("-")
         self.btn_zoom_in = QPushButton("+")
         self.btn_reload = QPushButton("↻")
+        self.btn_zoom_out.setToolTip("Zoom Out")
+        self.btn_zoom_in.setToolTip("Zoom In")
+        self.btn_reload.setToolTip("Reload Node")
+
         self.btn_zoom_out.clicked.connect(self.zoom_out)
         self.btn_zoom_in.clicked.connect(self.zoom_in)
         self.btn_reload.clicked.connect(self.reload_page)
 
         header_layout.addWidget(self.status_dot)
         header_layout.addWidget(self.title_label)
-        header_layout.addSpacing(10)
-        header_layout.addWidget(self.url_label)
-        header_layout.addStretch()
+        header_layout.addWidget(self.url_label, stretch=1)
         header_layout.addWidget(self.btn_zoom_out)
         header_layout.addWidget(self.btn_zoom_in)
         header_layout.addWidget(self.btn_reload)
@@ -84,18 +135,20 @@ class AIPane(QWidget):
         self.web_view = QWebEngineView()
         layout.addWidget(self.header)
         layout.addWidget(self.web_view, stretch=1)
+        outer_layout.addWidget(self.container)
 
     def _on_url_changed(self, url: QUrl):
         url_str = url.toString()
         display_url = url_str.replace("https://", "").replace("www.", "")
-        if len(display_url) > 35: display_url = display_url[:32] + "..."
+        if len(display_url) > 34:
+            display_url = display_url[:31] + "..."
         self.url_label.setText(display_url)
         self.url_changed.emit(self.account_id, url_str)
 
     def set_status(self, state: str):
-        colors = {"ready": "#22c55e", "running": "#eab308", "rate_limited": "#ef4444"}
-        color = colors.get(state, "#a1a1aa")
-        self.status_dot.setStyleSheet(f"color: {color}; font-size: 14px;")
+        colors = {"ready": "#73d216", "running": "#f57900", "rate_limited": "#cc0000"}
+        color = colors.get(state, "#888a85")
+        self.status_dot.setStyleSheet(f"color: {color}; font-size: 13px;")
 
     def zoom_in(self):
         self.current_zoom += 0.1
@@ -110,3 +163,9 @@ class AIPane(QWidget):
 
     def get_page(self) -> AutoUploadPage:
         return self.page
+
+    def cleanup(self):
+        self.web_view.setPage(None)
+        if self.page:
+            self.page.deleteLater()
+            self.page = None
