@@ -1,7 +1,3 @@
-"""
-Nexus AI Orchestrator - Application Entry Point
-Restores previous workspaces or launches Setup Wizard for new projects.
-"""
 import sys
 import os
 import traceback
@@ -32,6 +28,7 @@ sys.excepthook = global_exception_handler
 def main():
     os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
     os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
+    os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = "--disable-features=CompressionDictionaryTransport"
     
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
@@ -55,6 +52,9 @@ def main():
             start_workspace(proj_data)
         wizard.project_configured.connect(on_configured)
         wizard.exec()
+
+    # Ensure clean profile teardown on exit to prevent cookie loss
+    app.aboutToQuit.connect(lambda: [pane.cleanup() for pane in main_window.panes.values()] if main_window else None)
 
     saved_projects = project_manager.list_projects()
     if saved_projects:

@@ -13,6 +13,7 @@ from ui.scheduler_dialog import TaskSchedulerDialog
 from ui.toast_notification import RateLimitToast
 from core.dom_scraper import DOMScraper
 from core.swarm_orchestrator import SwarmOrchestrator
+from core.code_harvester import CodeHarvester
 
 
 class MainWindow(QMainWindow):
@@ -28,6 +29,7 @@ class MainWindow(QMainWindow):
 
         self.dom_scraper = DOMScraper()
         self.orchestrator = SwarmOrchestrator(self.scheduler)
+        self.harvester = CodeHarvester()
 
         self.setWindowTitle(f"Nexus AI Orchestrator — {self.project_data['name']} [Swarm Workstation]")
         self.resize(1440, 900)
@@ -40,114 +42,43 @@ class MainWindow(QMainWindow):
 
         self.scheduler.queue_updated.connect(self.task_table.update_tasks)
         self.scheduler.task_due.connect(self._execute_scheduled_task)
-
         self.dom_scraper.scrape_complete.connect(self._on_scrape_complete)
         self.orchestrator.orchestration_complete.connect(self._on_orchestration_success)
         self.orchestrator.orchestration_error.connect(self._on_orchestration_error)
 
     def _apply_classic_linux_theme(self):
         self.setStyleSheet("""
-            QMainWindow {
-                background-color: #dcdad5;
-                font-family: 'Ubuntu', 'Cantarell', 'DejaVu Sans', 'Segoe UI', sans-serif;
-            }
-            QMenuBar {
-                background-color: #2e3436;
-                color: #eeeeec;
-                border-bottom: 1px solid #1c1f21;
-                padding: 2px 6px;
-                font-size: 12px;
-            }
-            QMenuBar::item {
-                background: transparent;
-                padding: 4px 10px;
-                border-radius: 2px;
-            }
-            QMenuBar::item:selected {
-                background-color: #4a90d9;
-                color: #ffffff;
-            }
-            QMenu {
-                background-color: #f6f5f4;
-                color: #2e3436;
-                border: 1px solid #a7a59f;
-                padding: 4px;
-            }
-            QMenu::item {
-                padding: 5px 24px 5px 12px;
-                font-size: 12px;
-            }
-            QMenu::item:selected {
-                background-color: #4a90d9;
-                color: #ffffff;
-            }
-            QStatusBar {
-                background-color: #d3d0c9;
-                color: #2e3436;
-                border-top: 1px solid #b5b2ac;
-                font-size: 11px;
-            }
-            QScrollBar:horizontal {
-                border: 1px solid #b5b2ac;
-                background: #e6e5e2;
-                height: 14px;
-                margin: 0px 14px 0px 14px;
-            }
-            QScrollBar::handle:horizontal {
-                background: #9a9790;
-                min-width: 30px;
-                border-radius: 2px;
-                margin: 2px;
-            }
-            QScrollBar::handle:horizontal:hover {
-                background: #77746d;
-            }
-            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
-                border: 1px solid #b5b2ac;
-                background: #dcdad5;
-                width: 13px;
-            }
+            QMainWindow { background-color: #dcdad5; font-family: 'Ubuntu', sans-serif; }
+            QMenuBar { background-color: #2e3436; color: #eeeeec; border-bottom: 1px solid #1c1f21; }
+            QMenuBar::item:selected { background-color: #4a90d9; color: #ffffff; }
+            QMenu { background-color: #f6f5f4; color: #2e3436; border: 1px solid #a7a59f; }
+            QMenu::item:selected { background-color: #4a90d9; color: #ffffff; }
+            QStatusBar { background-color: #d3d0c9; color: #2e3436; border-top: 1px solid #b5b2ac; font-size: 11px; }
+            QScrollBar:horizontal { border: 1px solid #b5b2ac; background: #e6e5e2; height: 14px; margin: 0 14px; }
+            QScrollBar::handle:horizontal { background: #9a9790; min-width: 30px; border-radius: 2px; }
+            QScrollBar::handle:horizontal:hover { background: #77746d; }
         """)
 
     def _setup_menubar(self):
         menubar = self.menuBar()
-
         file_menu = menubar.addMenu("&File")
         act_attach = QAction("Attach Document...", self)
         act_attach.triggered.connect(self._on_attach_file)
         file_menu.addAction(act_attach)
-        file_menu.addSeparator()
-        act_exit = QAction("Exit Workstation", self)
-        act_exit.triggered.connect(self.close)
-        file_menu.addAction(act_exit)
+        file_menu.addAction("Exit Workstation", self.close)
 
         swarm_menu = menubar.addMenu("&Swarm")
-        act_direct = QAction("Direct Send to Selected Node", self)
-        act_direct.triggered.connect(self._on_direct_send)
-        act_master = QAction("1. Dispatch Master Directive", self)
-        act_master.triggered.connect(self._on_send_master)
-        act_extract = QAction("2. Extract DOM && Delegate to Workers", self)
-        act_extract.triggered.connect(self._on_extract)
-        swarm_menu.addAction(act_direct)
-        swarm_menu.addSeparator()
-        swarm_menu.addAction(act_master)
-        swarm_menu.addAction(act_extract)
-
+        swarm_menu.addAction("Direct Send", self._on_direct_send)
+        swarm_menu.addAction("1. Dispatch Master Directive", self._on_send_master)
+        swarm_menu.addAction("2. Extract DOM && Delegate", self._on_extract)
+        
         sched_menu = menubar.addMenu("&Scheduler")
-        act_sched = QAction("Schedule Timed Task...", self)
-        act_sched.triggered.connect(self._open_scheduler_dialog)
-        act_clear = QAction("Clear Completed Tasks", self)
-        act_clear.triggered.connect(self.scheduler.clear_completed)
-        sched_menu.addAction(act_sched)
-        sched_menu.addAction(act_clear)
-
+        sched_menu.addAction("Schedule Task...", self._open_scheduler_dialog)
+        sched_menu.addAction("Clear Completed", self.scheduler.clear_completed)
+        
         view_menu = menubar.addMenu("&View")
-        act_toggle_log = QAction("Toggle System Task Queue", self)
-        act_toggle_log.triggered.connect(lambda: self.task_table.toggle_minimize())
-        act_reload_all = QAction("Reload All Browser Nodes", self)
-        act_reload_all.triggered.connect(self._reload_all_panes)
-        view_menu.addAction(act_toggle_log)
-        view_menu.addAction(act_reload_all)
+        view_menu.addAction("Toggle Task Log", lambda: self.task_table.toggle_minimize())
+        view_menu.addAction("Reload All Nodes", self._reload_all_panes)
 
     def _setup_ui(self):
         central = QWidget()
@@ -156,77 +87,21 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Formal GTK Control Toolbar
         self.cmd_bar = QFrame()
         self.cmd_bar.setFixedHeight(58)
         self.cmd_bar.setStyleSheet("""
-            QFrame {
-                background-color: #e8e6e3;
-                border-bottom: 1px solid #a7a59f;
-            }
-            QLabel {
-                color: #2e3436;
-                font-weight: bold;
-                font-size: 12px;
-                border: none;
-            }
-            QLineEdit, QComboBox {
-                background-color: #ffffff;
-                color: #2e3436;
-                border: 1px solid #a7a59f;
-                border-radius: 3px;
-                padding: 5px 8px;
-                font-size: 12px;
-            }
-            QLineEdit:focus, QComboBox:focus {
-                border: 1px solid #4a90d9;
-            }
-            QPushButton {
-                background-color: #f4f3f1;
-                color: #2e3436;
-                font-weight: bold;
-                padding: 6px 12px;
-                border-radius: 3px;
-                border: 1px solid #a7a59f;
-                font-size: 12px;
-            }
-            QPushButton:hover {
-                background-color: #ffffff;
-                border-color: #888681;
-            }
-            QPushButton:pressed {
-                background-color: #d6d4d0;
-            }
-            QPushButton#directBtn {
-                background-color: #3584e4;
-                color: #ffffff;
-                border: 1px solid #1b6ACB;
-            }
-            QPushButton#directBtn:hover {
-                background-color: #4a90d9;
-            }
-            QPushButton#masterBtn {
-                background-color: #77216f;
-                color: #ffffff;
-                border: 1px solid #5e2750;
-            }
-            QPushButton#masterBtn:hover {
-                background-color: #8c2d83;
-            }
-            QPushButton#extractBtn {
-                background-color: #5a8e3e;
-                color: #ffffff;
-                border: 1px solid #46712f;
-            }
-            QPushButton#extractBtn:hover {
-                background-color: #689d4a;
-            }
+            QFrame { background-color: #e8e6e3; border-bottom: 1px solid #a7a59f; }
+            QLabel { color: #2e3436; font-weight: bold; font-size: 12px; }
+            QLineEdit, QComboBox { background-color: #ffffff; border: 1px solid #a7a59f; border-radius: 3px; padding: 5px 8px; }
+            QPushButton { background-color: #f4f3f1; font-weight: bold; padding: 6px 12px; border: 1px solid #a7a59f; border-radius: 3px;}
+            QPushButton:hover { background-color: #ffffff; }
+            QPushButton#directBtn { background-color: #3584e4; color: #ffffff; border: 1px solid #1b6ACB; }
+            QPushButton#masterBtn { background-color: #77216f; color: #ffffff; border: 1px solid #5e2750; }
+            QPushButton#extractBtn { background-color: #5a8e3e; color: #ffffff; border: 1px solid #46712f; }
+            QPushButton#harvestBtn { background-color: #c46200; color: #ffffff; border: 1px solid #8f4700; }
         """)
 
         cmd_layout = QHBoxLayout(self.cmd_bar)
-        cmd_layout.setContentsMargins(12, 8, 12, 8)
-        cmd_layout.setSpacing(8)
-
         cmd_layout.addWidget(QLabel("Master / Target Node:"))
         self.master_combo = QComboBox()
         self.master_combo.setMinimumWidth(190)
@@ -239,21 +114,24 @@ class MainWindow(QMainWindow):
 
         self.btn_attach = QPushButton("Attach File...")
         self.btn_attach.clicked.connect(self._on_attach_file)
-
         self.btn_schedule = QPushButton("Schedule...")
         self.btn_schedule.clicked.connect(self._open_scheduler_dialog)
-
+        
         self.btn_direct = QPushButton("Direct Send")
         self.btn_direct.setObjectName("directBtn")
         self.btn_direct.clicked.connect(self._on_direct_send)
-
+        
         self.btn_send_master = QPushButton("1. Send Master Directive")
         self.btn_send_master.setObjectName("masterBtn")
         self.btn_send_master.clicked.connect(self._on_send_master)
-
+        
         self.btn_extract = QPushButton("2. Extract && Delegate")
         self.btn_extract.setObjectName("extractBtn")
         self.btn_extract.clicked.connect(self._on_extract)
+        
+        self.btn_harvest = QPushButton("3. Harvest && Build")
+        self.btn_harvest.setObjectName("harvestBtn")
+        self.btn_harvest.clicked.connect(self._on_harvest)
 
         cmd_layout.addWidget(self.master_combo)
         cmd_layout.addWidget(self.prompt_input, stretch=1)
@@ -262,8 +140,8 @@ class MainWindow(QMainWindow):
         cmd_layout.addWidget(self.btn_direct)
         cmd_layout.addWidget(self.btn_send_master)
         cmd_layout.addWidget(self.btn_extract)
+        cmd_layout.addWidget(self.btn_harvest)
 
-        # Horizontal Scroll Area to prevent UI collapse on 4+ accounts
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
@@ -273,17 +151,7 @@ class MainWindow(QMainWindow):
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
         self.splitter.setChildrenCollapsible(False)
         self.splitter.setHandleWidth(5)
-        self.splitter.setStyleSheet("""
-            QSplitter { background-color: #dcdad5; padding: 6px; }
-            QSplitter::handle {
-                background-color: #b5b2ac;
-                border-left: 1px solid #dcdad5;
-                border-right: 1px solid #9a9790;
-            }
-            QSplitter::handle:hover {
-                background-color: #4a90d9;
-            }
-        """)
+        self.splitter.setStyleSheet("QSplitter::handle { background-color: #b5b2ac; border-left: 1px solid #dcdad5; }")
         self.scroll_area.setWidget(self.splitter)
 
         self.task_table = TaskTable()
@@ -296,28 +164,20 @@ class MainWindow(QMainWindow):
     def _setup_statusbar(self):
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
-        node_count = len(self.project_data.get('accounts', []))
-        self.status_bar.showMessage(
-            f"System Ready  |  Workspace: {self.project_data['name']}  |  "
-            f"Active Nodes: {node_count} (Horizontal Scroll Enabled)  |  Turnstile Poll: 2000ms"
-        )
+        self.status_bar.showMessage(f"System Ready | Workspace: {self.project_data['name']} | Turnstile Poll: 2000ms")
 
     def _initialize_panes(self):
         for acc in self.project_data['accounts']:
             prof = self.session_manager.get_or_create_profile(acc['profile_id'])
             start_url = acc.get('current_url') or "https://claude.ai/new"
             pane = AIPane(acc['id'], acc['account_name'], "claude", prof, start_url)
-            # Lock minimum width to 460px so horizontal scrollbar triggers cleanly
             pane.setMinimumWidth(460)
-            pane.url_changed.connect(
-                lambda aid, url: self.project_manager.update_account_url(self.project_data['id'], aid, url)
-            )
+            pane.url_changed.connect(lambda aid, url: self.project_manager.update_account_url(self.project_data['id'], aid, url))
             self.panes[acc['id']] = pane
             self.splitter.addWidget(pane)
 
     def _reload_all_panes(self):
-        for pane in self.panes.values():
-            pane.reload_page()
+        for pane in self.panes.values(): pane.reload_page()
 
     def _get_worker_accounts(self, master_id: str):
         return [acc for acc in self.project_data['accounts'] if acc['id'] != master_id]
@@ -326,13 +186,8 @@ class MainWindow(QMainWindow):
         file_path, _ = QFileDialog.getOpenFileName(self, "Select Attachment", "", "All Files (*.*)")
         if file_path:
             self.attached_file_path = file_path
-            filename = os.path.basename(file_path)
-            if len(filename) > 16:
-                filename = filename[:13] + "..."
-            self.btn_attach.setStyleSheet(
-                "background-color: #5a8e3e; color: #ffffff; border: 1px solid #46712f; font-weight: bold;"
-            )
-            self.btn_attach.setText(f"File: {filename}")
+            self.btn_attach.setStyleSheet("background-color: #5a8e3e; color: #ffffff;")
+            self.btn_attach.setText(f"File: {os.path.basename(file_path)[:13]}...")
 
     def _reset_attach_button(self):
         self.attached_file_path = None
@@ -345,151 +200,95 @@ class MainWindow(QMainWindow):
         dlg.exec()
 
     def _on_dialog_task_scheduled(self, data: dict):
-        target_id = data["target_id"]
-        target_time = data["target_time"]
-        prompt = data["prompt"]
-        file_path = data.get("file_path")
-
-        if target_id == "all":
+        if data["target_id"] == "all":
             for idx, acc in enumerate(self.project_data['accounts']):
-                self.scheduler.add_task(
-                    account_id=acc['id'],
-                    platform=acc.get('platform', 'claude'),
-                    prompt_text=prompt,
-                    target_time=target_time.addSecs(idx * 3),
-                    file_path=file_path
-                )
+                self.scheduler.add_task(acc['id'], "claude", data["prompt"], data["target_time"].addSecs(idx * 3), data.get("file_path"))
         else:
-            self.scheduler.add_task(
-                account_id=target_id,
-                platform="claude",
-                prompt_text=prompt,
-                target_time=target_time,
-                file_path=file_path
-            )
+            self.scheduler.add_task(data["target_id"], "claude", data["prompt"], data["target_time"], data.get("file_path"))
 
     def _on_direct_send(self):
         prompt = self.prompt_input.text().strip()
-        target_id = self.master_combo.currentData()
-
-        if not prompt and not self.attached_file_path:
-            return
-
-        self.scheduler.add_task(
-            account_id=target_id,
-            platform="claude",
-            prompt_text=prompt,
-            target_time=QTime.currentTime(),
-            file_path=self.attached_file_path
-        )
-
+        if not prompt and not self.attached_file_path: return
+        self.scheduler.add_task(self.master_combo.currentData(), "claude", prompt, QTime.currentTime(), self.attached_file_path)
         self.prompt_input.clear()
         self._reset_attach_button()
 
     def _on_send_master(self):
         prompt = self.prompt_input.text().strip()
-        if not prompt:
-            return
-
+        if not prompt: return
         master_id = self.master_combo.currentData()
         workers = self._get_worker_accounts(master_id)
-
         if not workers:
-            QMessageBox.warning(
-                self,
-                "Swarm Configuration Warning",
-                "Swarm mode requires at least 2 accounts (1 Master Node and 1+ Subordinate Nodes)."
-            )
+            QMessageBox.warning(self, "Swarm Warning", "Swarm requires 1 Master and 1+ Workers.")
             return
-
         master_directive = self.orchestrator.build_master_directive(prompt, workers)
-
-        self.scheduler.add_task(
-            account_id=master_id,
-            platform="claude",
-            prompt_text=master_directive,
-            target_time=QTime.currentTime(),
-            file_path=self.attached_file_path
-        )
-
+        self.scheduler.add_task(master_id, "claude", master_directive, QTime.currentTime(), self.attached_file_path)
         self.prompt_input.clear()
         self._reset_attach_button()
 
     def _on_extract(self):
         master_id = self.master_combo.currentData()
         master_pane = self.panes.get(master_id)
-
         if master_pane:
             self.status_bar.showMessage(f"Extracting latest DOM response from Master ({master_id})...")
-            self.dom_scraper.extract_latest_response(
-                page=master_pane.get_page(),
-                account_id=master_id,
-                task_id="master_extraction"
-            )
+            self.dom_scraper.extract_latest_response(master_pane.get_page(), master_id, "master_extraction")
+
+    def _on_harvest(self):
+        self.status_bar.showMessage("Harvesting code from all active nodes...")
+        for aid, pane in self.panes.items():
+            page = pane.get_page()
+            if page:
+                page.runJavaScript(
+                    "document.body.innerText;", 
+                    lambda text, p_id=aid: self._process_harvest(text, p_id)
+                )
+
+    def _process_harvest(self, text, account_id):
+        if text:
+            files = self.harvester.parse_and_write_files(text, self.project_data['name'])
+            if files:
+                reply = QMessageBox.question(
+                    self, "Harvest Complete", 
+                    f"Materialized {len(files)} files from node {account_id}!\nOpen project directory in VS Code?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                )
+                if reply == QMessageBox.StandardButton.Yes:
+                    self.harvester.open_in_vscode(self.project_data['name'])
 
     def _on_scrape_complete(self, account_id, task_id, result):
         if not result.get("success"):
-            QMessageBox.warning(
-                self, "DOM Extraction Error", f"Failed to read response from node:\n{result.get('error')}"
-            )
+            QMessageBox.warning(self, "DOM Error", f"Failed to read node:\n{result.get('error')}")
             return
-
-        raw_text = result.get("text", "")
-        master_id = self.master_combo.currentData()
-        workers = self._get_worker_accounts(master_id)
-        self.orchestrator.process_master_response(raw_text, workers)
+        self.orchestrator.process_master_response(result.get("text", ""), self._get_worker_accounts(self.master_combo.currentData()))
 
     def _on_orchestration_success(self, task_count):
-        self.status_bar.showMessage(f"Swarm Delegation Complete: {task_count} subordinate tasks queued.")
-        QMessageBox.information(
-            self, "Swarm Delegation Queued", f"Extracted and scheduled {task_count} subordinate tasks."
-        )
+        self.status_bar.showMessage(f"Delegation Complete: {task_count} tasks queued.")
 
     def _on_orchestration_error(self, error_msg):
-        QMessageBox.warning(self, "Swarm Delegation Failed", error_msg)
+        QMessageBox.warning(self, "Delegation Failed", error_msg)
 
     def _execute_scheduled_task(self, task):
         pane = self.panes.get(task['account_id'])
         if not pane:
             self.scheduler.update_task_status(task['id'], "failed")
             return
-
         pane.set_status("running")
-        # Ensure the active pane is scrolled into view before pasting files
         self.scroll_area.ensureWidgetVisible(pane)
-
-        main_hwnd = int(self.winId())
         self.injector.send_prompt(
-            page=pane.get_page(),
-            platform=pane.provider.lower(),
-            prompt_text=task['prompt_text'],
-            file_path=task.get('file_path'),
-            main_hwnd=main_hwnd,
-            view=pane.web_view,
+            page=pane.get_page(), platform=pane.provider.lower(),
+            prompt_text=task['prompt_text'], file_path=task.get('file_path'),
+            main_hwnd=int(self.winId()), view=pane.web_view,
             callback=lambda res: self._on_injection_result(task['id'], task['account_id'], res)
         )
 
     def _on_injection_result(self, task_id, account_id, result):
         if result.get("success"):
             self.scheduler.update_task_status(task_id, "success")
-            if account_id in self.panes:
-                self.panes[account_id].set_status("ready")
+            if account_id in self.panes: self.panes[account_id].set_status("ready")
         else:
             self.scheduler.update_task_status(task_id, "failed")
-            if account_id in self.panes:
-                self.panes[account_id].set_status("rate_limited")
-                toast = RateLimitToast(
-                    account_id,
-                    self.panes[account_id].account_name,
-                    self.panes[account_id].provider,
-                    "Cooldown Active",
-                    self
-                )
-                toast.move(self.width() - toast.width() - 25, self.height() - toast.height() - 45)
-                toast.show()
+            if account_id in self.panes: self.panes[account_id].set_status("rate_limited")
 
     def closeEvent(self, event):
-        # Cleanly dispose of QWebEnginePages before QWebEngineProfiles are released
-        for pane in self.panes.values():
-            pane.cleanup()
+        for pane in self.panes.values(): pane.cleanup()
         super().closeEvent(event)
