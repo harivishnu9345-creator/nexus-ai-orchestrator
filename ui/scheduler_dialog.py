@@ -1,8 +1,8 @@
-import os
-from PyQt6.QtCore import Qt, QTime, pyqtSignal
+﻿import os
+from PyQt6.QtCore import Qt, QDateTime, pyqtSignal
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QComboBox, QTextEdit, QTimeEdit, QFileDialog
+    QComboBox, QTextEdit, QDateTimeEdit, QFileDialog
 )
 
 
@@ -20,39 +20,52 @@ class TaskSchedulerDialog(QDialog):
     def _setup_ui(self):
         self.setStyleSheet("""
             QDialog {
-                background-color: #dcdad5;
-                color: #2e3436;
+                background-color: #09090b;
+                color: #f4f4f5;
                 font-family: 'Ubuntu', 'Cantarell', 'DejaVu Sans', sans-serif;
             }
             QLabel {
-                color: #2e3436;
+                color: #e4e4e7;
                 font-size: 12px;
                 font-weight: bold;
             }
-            QComboBox, QTimeEdit, QTextEdit {
-                background-color: #ffffff;
-                border: 1px solid #a7a59f;
-                border-radius: 3px;
-                color: #2e3436;
-                padding: 5px;
+            QComboBox, QDateTimeEdit, QTextEdit {
+                background-color: #141417;
+                border: 1px solid #27272a;
+                border-radius: 4px;
+                color: #f4f4f5;
+                padding: 6px;
                 font-size: 12px;
             }
+            QComboBox:focus, QDateTimeEdit:focus, QTextEdit:focus {
+                border: 1px solid #3b82f6;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #141417;
+                color: #f4f4f5;
+                selection-background-color: #2563eb;
+                border: 1px solid #27272a;
+            }
             QPushButton {
-                background-color: #f4f3f1;
-                color: #2e3436;
-                border: 1px solid #a7a59f;
-                border-radius: 3px;
+                background-color: #1f1f23;
+                color: #e4e4e7;
+                border: 1px solid #3f3f46;
+                border-radius: 4px;
                 padding: 6px 14px;
                 font-weight: bold;
                 font-size: 12px;
             }
             QPushButton:hover {
-                background-color: #ffffff;
+                background-color: #27272a;
+                color: #ffffff;
             }
             QPushButton#primaryBtn {
-                background-color: #3584e4;
+                background-color: #2563eb;
                 color: #ffffff;
-                border: 1px solid #1b6acb;
+                border: 1px solid #3b82f6;
+            }
+            QPushButton#primaryBtn:hover {
+                background-color: #1d4ed8;
             }
         """)
 
@@ -67,15 +80,16 @@ class TaskSchedulerDialog(QDialog):
             self.combo_target.addItem(f"{acc['account_name']} ({acc['platform'].capitalize()})", acc['id'])
         layout.addWidget(self.combo_target)
 
-        layout.addWidget(QLabel("Scheduled Execution Time:"))
-        self.time_picker = QTimeEdit()
-        self.time_picker.setDisplayFormat("hh:mm:ss AP")
-        self.time_picker.setTime(QTime.currentTime().addSecs(60))
-        layout.addWidget(self.time_picker)
+        layout.addWidget(QLabel("Scheduled Execution Date & Time:"))
+        self.datetime_picker = QDateTimeEdit()
+        self.datetime_picker.setCalendarPopup(True)
+        self.datetime_picker.setDisplayFormat("yyyy-MM-dd hh:mm:ss AP")
+        self.datetime_picker.setDateTime(QDateTime.currentDateTime().addSecs(60))
+        layout.addWidget(self.datetime_picker)
 
         layout.addWidget(QLabel("Prompt Payload:"))
         self.prompt_text = QTextEdit()
-        self.prompt_text.setPlaceholderText("Enter prompt to dispatch at scheduled time...")
+        self.prompt_text.setPlaceholderText("Enter prompt to dispatch at scheduled date & time...")
         layout.addWidget(self.prompt_text)
 
         self.btn_attach = QPushButton("Attach Document to Task...")
@@ -99,16 +113,18 @@ class TaskSchedulerDialog(QDialog):
         file_path, _ = QFileDialog.getOpenFileName(self, "Select Document", "", "All Files (*.*)")
         if file_path:
             self.attached_file_path = file_path
-            self.btn_attach.setStyleSheet("background-color: #5a8e3e; color: white;")
+            self.btn_attach.setStyleSheet("background-color: #065f46; color: #a7f3d0; border: 1px solid #10b981;")
             self.btn_attach.setText(f"Attached: {os.path.basename(file_path)}")
 
     def _on_schedule(self):
         prompt = self.prompt_text.toPlainText().strip()
         if not prompt and not self.attached_file_path:
             return
+        dt = self.datetime_picker.dateTime()
         self.task_scheduled.emit({
             "target_id": self.combo_target.currentData(),
-            "target_time": self.time_picker.time(),
+            "target_datetime": dt,
+            "target_time": dt.time(),
             "prompt": prompt,
             "file_path": self.attached_file_path
         })

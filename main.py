@@ -1,71 +1,110 @@
-import sys
+﻿import sys
+import json
 import os
-import traceback
-from PyQt6.QtWidgets import QApplication, QMessageBox
-
-from core.session_manager import SessionManager
+from PyQt6.QtWidgets import QApplication, QDialog
 from core.project_manager import ProjectManager
-from core.injector import DOMInjector
-from core.scheduler import TaskScheduler
-from ui.onboarding_dialog import OnboardingDialog
 from ui.project_hub import ProjectHubDialog
+from ui.onboarding_dialog import OnboardingDialog
 from ui.main_window import MainWindow
 
-def global_exception_handler(exc_type, exc_value, exc_traceback):
-    error_msg = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
-    print(f"CRITICAL ERROR:\n{error_msg}")
-    if QApplication.instance():
-        msg_box = QMessageBox()
-        msg_box.setIcon(QMessageBox.Icon.Critical)
-        msg_box.setWindowTitle("Fatal Application Error")
-        msg_box.setText("An unexpected error occurred.")
-        msg_box.setDetailedText(error_msg)
-        msg_box.exec()
-    sys.exit(1)
 
-sys.excepthook = global_exception_handler
+def load_config(config_path="config.json"):
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Error loading config.json: {e}")
+
+    return {
+        "app": {
+            "name": "Nexus AI Orchestrator",
+            "version": "1.8.0",
+            "default_zoom": 0.75,
+            "storage_root": "~/.nexus_orchestrator"
+        },
+        "platforms": {
+            "claude": {
+                "name": "Claude",
+                "home_url": "https://claude.ai/new",
+                "selectors": {
+                    "input_box": "div[contenteditable='true']",
+                    "send_button": "button[aria-label='Send Message'], button[aria-label='Send message']",
+                    "stop_button": "button[aria-label='Stop response']"
+                }
+            }
+        }
+    }
+
+
+def get_saved_projects(project_mgr: ProjectManager) -> list:
+    for method_name in ("load_projects", "get_projects", "list_projects"):
+        if hasattr(project_mgr, method_name):
+            res = getattr(project_mgr, method_name)()
+            if isinstance(res, list):
+                return res
+    if hasattr(project_mgr, "projects") and isinstance(project_mgr.projects, list):
+        return project_mgr.projects
+    return []
+
+
+def save_workspace_project(project_mgr: ProjectManager, proj_dict: dict):
+    if hasattr(project_mgr, "save_project"):
+        try:
+            project_mgr.save_project(proj_dict)
+        except TypeError:
+            project_mgr.save_project(proj_dict.get("name", "Untitled"), proj_dict.get("accounts", []))
+
+
+def select_workspace_before_boot(project_mgr: ProjectManager):
+    """
+    1. ALWAYS opens ProjectHubDialog (Saved Swarm Workspaces) first.
+    2. Only opens OnboardingDialog if the user clicks '+ New Workspace'.
+    """
+    selected_workspace = {"data": None, "create_new": False}
+
+    projects = get_saved_projects(project_mgr)
+
+    # Always show ProjectHubDialog first
+    hub = ProjectHubDialog(projects)
+    hub.open_project.connect(lambda proj: selected_workspace.update({"data": proj}))
+    hub.create_new_clicked.connect(lambda: selected_workspace.update({"create_new": True}))
+    hub.exec()
+
+    # Case A: User clicked "Load Workspace" on an existing project
+    if selected_workspace["data"]:
+        return selected_workspace["data"]
+
+    # Case B: User closed the dialog without clicking "+ New Workspace"
+    if not selected_workspace["create_new"]:
+        return None
+
+    # Case C: User explicitly clicked "+ New Workspace" -> Open OnboardingDialog
+    onboard = OnboardingDialog()
+    onboard.project_configured.connect(lambda proj: selected_workspace.update({"data": proj}))
+    if onboard.exec() == QDialog.DialogCode.Accepted and selected_workspace["data"]:
+        proj = selected_workspace["data"]
+        save_workspace_project(project_mgr, proj)
+        return proj
+
+    return None
+
 
 def main():
-    os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
-    os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
-    os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = "--disable-features=CompressionDictionaryTransport"
-    
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
-    
-    session_manager = SessionManager()
-    project_manager = ProjectManager()
-    injector = DOMInjector()
-    scheduler = TaskScheduler()
-    
-    main_window = None
 
-    def start_workspace(project_data):
-        nonlocal main_window
-        main_window = MainWindow(project_data, session_manager, project_manager, injector, scheduler)
-        main_window.show()
+    project_mgr = ProjectManager()
+    workspace_data = select_workspace_before_boot(project_mgr)
 
-    def launch_wizard():
-        wizard = OnboardingDialog()
-        def on_configured(config):
-            proj_data = project_manager.create_project(config["name"], config["accounts"])
-            start_workspace(proj_data)
-        wizard.project_configured.connect(on_configured)
-        wizard.exec()
+    if not workspace_data:
+        sys.exit(0)
 
-    # Ensure clean profile teardown on exit to prevent cookie loss
-    app.aboutToQuit.connect(lambda: [pane.cleanup() for pane in main_window.panes.values()] if main_window else None)
-
-    saved_projects = project_manager.list_projects()
-    if saved_projects:
-        hub = ProjectHubDialog(saved_projects)
-        hub.open_project.connect(start_workspace)
-        hub.create_new_clicked.connect(launch_wizard)
-        if not hub.exec(): sys.exit(0)
-    else:
-        launch_wizard()
-
+    config = load_config()
+    window = MainWindow(config, workspace_data=workspace_data)
+    window.show()
     sys.exit(app.exec())
+
 
 if __name__ == "__main__":
     main()

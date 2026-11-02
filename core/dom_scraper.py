@@ -1,6 +1,7 @@
-import json
+﻿from typing import Callable
 from PyQt6.QtCore import QObject, pyqtSignal
 from PyQt6.QtWebEngineCore import QWebEnginePage
+
 
 class DOMScraper(QObject):
     scrape_complete = pyqtSignal(str, str, dict)
@@ -8,56 +9,77 @@ class DOMScraper(QObject):
     def __init__(self):
         super().__init__()
 
-    def extract_latest_response(self, page: QWebEnginePage, account_id: str, task_id: str):
-        print(f"\n[SCRAPER] 🚀 Initializing DOM extraction for Master Account: {account_id}")
-        
-        # Bug Fix 2: Prevent fatal crashes if the pane was closed or page is invalid
+    @staticmethod
+    def scrape_page_text(page: QWebEnginePage, callback: Callable[[str], None]):
         if not page:
-            print(f"[SCRAPER] ❌ Extraction Failed: Target page object is None.")
-            self.scrape_complete.emit(account_id, task_id, {"success": False, "error": "Target page is invalid or closed."})
+            callback("")
             return
-        
-        # Bug Fix 1 & 3: Broadened selectors and safer DOM stripping
-        js_code = """
+
+        js_code = r"""
         (function() {
             try {
-                // Catch Claude's modern DOM updates using attribute roles and fallback classes
-                const responses = document.querySelectorAll(
-                    '[data-message-author-role="assistant"], .font-claude-response, .font-claude-message, .font-claude-response-body, .prose'
-                );
-                
-                if (responses.length === 0) {
-                    return { success: false, error: "No responses found on page. Claude UI may have updated." };
+                // 1. Find the full assistant message container (avoiding partial child .prose fragments)
+                const tierSelectors = [
+                    '[data-message-author-role="assistant"]',
+                    '.font-claude-response',
+                    '.font-claude-message',
+                    '[data-testid*="assistant"]',
+                    '[data-is-streaming]'
+                ];
+
+                let targetContainer = null;
+                for (const sel of tierSelectors) {
+                    const matches = document.querySelectorAll(sel);
+                    if (matches.length > 0) {
+                        targetContainer = matches[matches.length - 1];
+                        break;
+                    }
                 }
-                
-                const lastResponse = responses[responses.length - 1];
-                const clone = lastResponse.cloneNode(true);
-                
-                // Safely strip UI bloat like copy buttons and SVG icons
-                // Removed [aria-hidden] to prevent accidental code-block stripping
-                clone.querySelectorAll('button, svg').forEach(n => n.remove());
-                
-                return { success: true, text: clone.innerText.trim() };
+
+                // Fallback: if only .prose elements exist, climb up to their shared message wrapper
+                if (!targetContainer) {
+                    const proseList = document.querySelectorAll('.prose');
+                    if (proseList.length > 0) {
+                        const lastProse = proseList[proseList.length - 1];
+                        targetContainer = lastProse.closest('[data-test-render-count]') || lastProse.parentElement || lastProse;
+                    }
+                }
+
+                if (!targetContainer) {
+                    targetContainer = document.body;
+                }
+
+                const clone = targetContainer.cloneNode(true);
+
+                // 2. Strip UI buttons, copy toolbars, and SVGs before extracting code
+                clone.querySelectorAll('button, svg, [role="toolbar"]').forEach(n => n.remove());
+
+                // 3. Convert every <pre> block into explicit ``` fenced markdown so regex harvesters never miss code
+                clone.querySelectorAll('pre').forEach(pre => {
+                    const codeEl = pre.querySelector('code');
+                    const rawCode = codeEl ? codeEl.innerText : pre.innerText;
+                    const fencedText = "\n```\n" + rawCode.trim() + "\n```\n";
+                    const replacement = document.createTextNode(fencedText);
+                    pre.parentNode.replaceChild(replacement, pre);
+                });
+
+                return clone.innerText.trim();
             } catch (e) {
-                return { success: false, error: e.toString() };
+                return document.body ? document.body.innerText : "";
             }
         })();
         """
+        page.runJavaScript(js_code, lambda res: callback(res if isinstance(res, str) else ""))
 
-        def _callback(result):
-            # Bug Fix 4: Safely handle null or unexpected data types from the JS engine
-            if result is None or not isinstance(result, dict):
-                print(f"[SCRAPER] ❌ JS Execution Failed: Returned None or invalid type.")
-                self.scrape_complete.emit(account_id, task_id, {"success": False, "error": "JS returned None or invalid payload."})
-                return
-                
-            if not result.get("success"):
-                print(f"[SCRAPER] ❌ Extraction Failed: {result.get('error')}")
-                self.scrape_complete.emit(account_id, task_id, result)
+    def extract_latest_response(self, page: QWebEnginePage, account_id: str, task_id: str):
+        if not page:
+            self.scrape_complete.emit(account_id, task_id, {"success": False, "error": "Target page is invalid or closed."})
+            return
+
+        def _on_text(text: str):
+            if text:
+                self.scrape_complete.emit(account_id, task_id, {"success": True, "text": text})
             else:
-                text_len = len(result.get("text", ""))
-                print(f"[SCRAPER] ✅ Extraction Success! Retrieved {text_len} characters from the DOM.")
-                self.scrape_complete.emit(account_id, task_id, result)
+                self.scrape_complete.emit(account_id, task_id, {"success": False, "error": "No response text found."})
 
-        print("[SCRAPER] Executing JavaScript payload in embedded browser...")
-        page.runJavaScript(js_code, _callback)
+        DOMScraper.scrape_page_text(page, _on_text)

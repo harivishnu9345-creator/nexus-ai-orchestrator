@@ -1,4 +1,4 @@
-import os
+﻿import os
 from PyQt6.QtCore import QUrl, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame, QSizePolicy
@@ -42,8 +42,9 @@ class AIPane(QWidget):
         self.web_view.urlChanged.connect(self._on_url_changed)
 
     def _setup_ui(self):
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.setMinimumSize(460, 420)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
+        self.setFixedWidth(455)
+        self.setMinimumHeight(340)
 
         outer_layout = QVBoxLayout(self)
         outer_layout.setContentsMargins(0, 0, 0, 0)
@@ -53,8 +54,8 @@ class AIPane(QWidget):
         self.container.setObjectName("PaneFrame")
         self.container.setStyleSheet("""
             QFrame#PaneFrame {
-                background-color: #ffffff;
-                border: 1px solid #9a9790;
+                background-color: #09090b;
+                border: 1px solid #27272a;
                 border-radius: 2px;
             }
         """)
@@ -62,34 +63,33 @@ class AIPane(QWidget):
         layout.setContentsMargins(1, 1, 1, 1)
         layout.setSpacing(0)
 
-        # Classic Dark GTK Window Header Bar
         self.header = QFrame()
         self.header.setFixedHeight(34)
         self.header.setStyleSheet("""
             QFrame {
-                background-color: #35393c;
-                border-bottom: 1px solid #1c1f21;
+                background-color: #18181b;
+                border-bottom: 1px solid #27272a;
             }
             QLabel {
-                color: #eeeeec;
+                color: #f4f4f5;
                 font-family: 'Ubuntu', 'DejaVu Sans', sans-serif;
                 border: none;
             }
             QPushButton {
-                background-color: #454a4d;
-                color: #eeeeec;
-                border: 1px solid #232629;
+                background-color: #27272a;
+                color: #e4e4e7;
+                border: 1px solid #3f3f46;
                 font-weight: bold;
                 padding: 2px 7px;
                 border-radius: 2px;
                 font-size: 11px;
             }
             QPushButton:hover {
-                background-color: #565c60;
+                background-color: #3f3f46;
                 color: #ffffff;
             }
             QPushButton:pressed {
-                background-color: #2b2e30;
+                background-color: #09090b;
             }
         """)
 
@@ -98,19 +98,19 @@ class AIPane(QWidget):
         header_layout.setSpacing(6)
 
         self.status_dot = QLabel("●")
-        self.status_dot.setStyleSheet("color: #73d216; font-size: 13px;")
+        self.status_dot.setStyleSheet("color: #10b981; font-size: 13px;")
 
         self.title_label = QLabel(f"{self.account_name} [{self.provider}]")
         self.title_label.setStyleSheet("font-size: 12px; font-weight: bold;")
 
         self.url_label = QLabel("")
         self.url_label.setStyleSheet("""
-            background-color: #232629;
-            color: #babdb6;
+            background-color: #09090b;
+            color: #a1a1aa;
             font-family: 'DejaVu Sans Mono', 'Consolas', monospace;
             font-size: 10px;
             padding: 2px 6px;
-            border: 1px solid #181a1c;
+            border: 1px solid #27272a;
             border-radius: 2px;
         """)
 
@@ -140,14 +140,14 @@ class AIPane(QWidget):
     def _on_url_changed(self, url: QUrl):
         url_str = url.toString()
         display_url = url_str.replace("https://", "").replace("www.", "")
-        if len(display_url) > 34:
-            display_url = display_url[:31] + "..."
+        if len(display_url) > 28:
+            display_url = display_url[:25] + "..."
         self.url_label.setText(display_url)
         self.url_changed.emit(self.account_id, url_str)
 
     def set_status(self, state: str):
-        colors = {"ready": "#73d216", "running": "#f57900", "rate_limited": "#cc0000"}
-        color = colors.get(state, "#888a85")
+        colors = {"ready": "#10b981", "running": "#f59e0b", "rate_limited": "#ef4444"}
+        color = colors.get(state, "#71717a")
         self.status_dot.setStyleSheet(f"color: {color}; font-size: 13px;")
 
     def zoom_in(self):

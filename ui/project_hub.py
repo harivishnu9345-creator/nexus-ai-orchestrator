@@ -1,4 +1,4 @@
-from PyQt6.QtCore import Qt, pyqtSignal
+﻿from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QFrame
@@ -19,50 +19,54 @@ class ProjectHubDialog(QDialog):
     def _setup_ui(self):
         self.setStyleSheet("""
             QDialog {
-                background-color: #dcdad5;
-                color: #2e3436;
+                background-color: #09090b;
+                color: #f4f4f5;
                 font-family: 'Ubuntu', 'Cantarell', 'DejaVu Sans', 'Segoe UI', sans-serif;
             }
             QLabel {
-                color: #2e3436;
+                color: #e4e4e7;
                 font-size: 12px;
             }
             QTableWidget {
-                background-color: #ffffff;
-                alternate-background-color: #f6f5f4;
-                color: #2e3436;
-                border: 1px solid #a7a59f;
-                gridline-color: #d3d0c9;
+                background-color: #09090b;
+                alternate-background-color: #121215;
+                color: #e4e4e7;
+                border: 1px solid #27272a;
+                gridline-color: #27272a;
                 font-size: 12px;
+                selection-background-color: #2563eb;
+                selection-color: #ffffff;
             }
             QHeaderView::section {
-                background-color: #e8e6e3;
-                color: #2e3436;
-                padding: 5px;
+                background-color: #18181b;
+                color: #a1a1aa;
+                padding: 6px 8px;
                 border: none;
-                border-right: 1px solid #b5b2ac;
-                border-bottom: 1px solid #a7a59f;
+                border-right: 1px solid #27272a;
+                border-bottom: 1px solid #27272a;
                 font-weight: bold;
+                font-size: 11px;
             }
             QPushButton {
-                background-color: #f4f3f1;
-                color: #2e3436;
-                border: 1px solid #a7a59f;
-                border-radius: 3px;
+                background-color: #1f1f23;
+                color: #e4e4e7;
+                border: 1px solid #3f3f46;
+                border-radius: 4px;
                 padding: 6px 14px;
                 font-weight: bold;
                 font-size: 12px;
             }
             QPushButton:hover {
-                background-color: #ffffff;
+                background-color: #27272a;
+                color: #ffffff;
             }
             QPushButton#primaryBtn {
-                background-color: #5a8e3e;
+                background-color: #059669;
                 color: #ffffff;
-                border: 1px solid #46712f;
+                border: 1px solid #10b981;
             }
             QPushButton#primaryBtn:hover {
-                background-color: #689d4a;
+                background-color: #047857;
             }
         """)
 
@@ -71,10 +75,10 @@ class ProjectHubDialog(QDialog):
         layout.setSpacing(12)
 
         header_frame = QFrame()
-        header_frame.setStyleSheet("background-color: #2e3436; border-radius: 3px; padding: 6px;")
+        header_frame.setStyleSheet("background-color: #141417; border: 1px solid #27272a; border-radius: 4px; padding: 8px;")
         header = QHBoxLayout(header_frame)
         title = QLabel("Saved Swarm Workspaces")
-        title.setStyleSheet("font-size: 15px; font-weight: bold; color: #ffffff;")
+        title.setStyleSheet("font-size: 15px; font-weight: bold; color: #f4f4f5; border: none;")
 
         btn_new = QPushButton("+ New Workspace")
         btn_new.setObjectName("primaryBtn")
@@ -107,8 +111,9 @@ class ProjectHubDialog(QDialog):
             acc_item = QTableWidgetItem(f"{len(acc_list)} nodes ({providers})")
 
             btn_open = QPushButton("Load Workspace")
+            btn_open.setCursor(Qt.CursorShape.PointingHandCursor)
             btn_open.setStyleSheet(
-                "padding: 3px 8px; font-size: 11px; background-color: #3584e4; color: #ffffff; border: 1px solid #1b6acb;"
+                "padding: 4px 10px; font-size: 11px; background-color: #2563eb; color: #ffffff; border: 1px solid #3b82f6; border-radius: 4px;"
             )
             btn_open.clicked.connect(lambda _, p=proj: self._on_open(p))
 

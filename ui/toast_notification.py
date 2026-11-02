@@ -1,4 +1,4 @@
-from PyQt6.QtCore import Qt, pyqtSignal
+﻿from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame
 
 
@@ -16,32 +16,36 @@ class RateLimitToast(QFrame):
         self.setObjectName("ToastCard")
         self.setStyleSheet("""
             #ToastCard {
-                background-color: #f6f5f4;
-                border: 1px solid #a7a59f;
-                border-left: 5px solid #cc0000;
-                border-radius: 3px;
+                background-color: #141417;
+                border: 1px solid #27272a;
+                border-left: 5px solid #ef4444;
+                border-radius: 6px;
             }
             QLabel {
-                color: #2e3436;
+                color: #f4f4f5;
                 font-family: 'Ubuntu', 'DejaVu Sans', sans-serif;
                 border: none;
             }
             QPushButton {
-                background-color: #e8e6e3;
-                color: #2e3436;
-                border: 1px solid #a7a59f;
-                border-radius: 2px;
-                padding: 4px 8px;
+                background-color: #1f1f23;
+                color: #e4e4e7;
+                border: 1px solid #3f3f46;
+                border-radius: 4px;
+                padding: 4px 10px;
                 font-weight: bold;
                 font-size: 11px;
             }
             QPushButton:hover {
-                background-color: #ffffff;
+                background-color: #27272a;
+                color: #ffffff;
             }
             QPushButton#primaryBtn {
-                background-color: #3584e4;
+                background-color: #2563eb;
                 color: #ffffff;
-                border: 1px solid #1b6acb;
+                border: 1px solid #3b82f6;
+            }
+            QPushButton#primaryBtn:hover {
+                background-color: #1d4ed8;
             }
         """)
         self.setFixedWidth(360)
@@ -52,22 +56,22 @@ class RateLimitToast(QFrame):
 
         header = QHBoxLayout()
         title = QLabel(f"Node Alert: {account_name} ({provider.capitalize()})")
-        title.setStyleSheet("font-weight: bold; font-size: 12px; color: #cc0000;")
+        title.setStyleSheet("font-weight: bold; font-size: 12px; color: #f87171;")
 
         btn_close = QPushButton("×")
-        btn_close.setFixedSize(20, 20)
+        btn_close.setFixedSize(22, 22)
         btn_close.clicked.connect(self.dismiss)
 
         header.addWidget(title)
         header.addStretch()
         header.addWidget(btn_close)
 
-        desc = QLabel(f"Injection failed or rate limit encountered. Status: <b>{resets_at}</b>.")
+        desc = QLabel(f"Injection failed or rate limit encountered. Cooldown resets at: <b>{resets_at}</b>.")
         desc.setWordWrap(True)
-        desc.setStyleSheet("color: #555753; font-size: 11px;")
+        desc.setStyleSheet("color: #a1a1aa; font-size: 11px;")
 
         actions = QHBoxLayout()
-        btn_resume = QPushButton("Wait & Retry")
+        btn_resume = QPushButton("Auto-Retry (2m)")
         btn_resume.setObjectName("primaryBtn")
         btn_resume.clicked.connect(lambda: (self.auto_resume_clicked.emit(self.account_id), self.deleteLater()))
 
