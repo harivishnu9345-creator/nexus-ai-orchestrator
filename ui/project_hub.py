@@ -1,4 +1,4 @@
-﻿from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QFrame
@@ -12,7 +12,7 @@ class ProjectHubDialog(QDialog):
     def __init__(self, projects: list, parent=None):
         super().__init__(parent)
         self.projects = projects
-        self.setWindowTitle("Nexus AI Orchestrator — Workspace Manager")
+        self.setWindowTitle("Nexus AI Orchestrator - Workspace Manager")
         self.resize(720, 440)
         self._setup_ui()
 

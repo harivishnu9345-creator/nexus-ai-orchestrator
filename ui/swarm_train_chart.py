@@ -1,4 +1,4 @@
-﻿import os
+import os
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
@@ -535,7 +535,7 @@ class SwarmTrainChartWidget(QWidget):
         self.train_layout.addWidget(self.final_card)
         self.train_layout.addStretch()
 
-        self.set_progress(0, "Blueprint Loaded â€” Ready")
+        self.set_progress(0, "Blueprint Loaded - Ready")
         if worker_accounts:
             first_id = worker_accounts[0]["id"]
             self._auto_scroll_to_widget(self.stage_widgets.get(first_id))
@@ -563,7 +563,7 @@ class SwarmTrainChartWidget(QWidget):
                 self._auto_scroll_to_widget(gate)
                 self.set_progress(
                     int(((gate_index + 1) / (len(self.gate_widgets) + 1)) * 100),
-                    f"Paused at Gate #{gate_index + 1} â€” Select files & click Approve"
+                    f"Paused at Gate #{gate_index + 1} - Select files & click Approve"
                 )
             else:
                 gate._on_approve_clicked()
@@ -573,3 +573,32 @@ class SwarmTrainChartWidget(QWidget):
         self.lbl_telemetry.setText(message)
         if percent >= 100 and self.final_card:
             self._auto_scroll_to_widget(self.final_card)
+
+
+    def _move_stage_order(self, stage_idx: int, direction: int):
+        """Allows reordering idle/waiting sub-Claude stages up or down in the relay pipeline."""
+        if not hasattr(self, "sessions") or not self.sessions:
+            return
+        active_sess = self.sessions[-1] if isinstance(self.sessions, list) else None
+        if not active_sess or "stages" not in active_sess:
+            return
+        stages = active_sess["stages"]
+        new_idx = stage_idx + direction
+        if new_idx < 0 or new_idx >= len(stages):
+            return
+
+        # Safety check: do not reorder stages that are IN_PROGRESS or COMPLETED
+        target_stage = stages[stage_idx]
+        if target_stage.get("status") in ("IN_PROGRESS", "COMPLETED", "RUNNING"):
+            return
+
+        stages[stage_idx], stages[new_idx] = stages[new_idx], stages[stage_idx]
+        if hasattr(self, "rebuild_chart") or hasattr(self, "_render_chart"):
+            try:
+                self.rebuild_chart()
+            except Exception:
+                try:
+                    self._render_chart()
+                except Exception:
+                    pass
+

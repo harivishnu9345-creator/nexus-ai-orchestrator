@@ -1,4 +1,4 @@
-﻿import json
+import json
 import os
 from typing import Any
 from PyQt6.QtCore import QObject, pyqtSignal, QUrl, QMimeData, QTimer

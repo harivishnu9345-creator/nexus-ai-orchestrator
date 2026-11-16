@@ -85,7 +85,7 @@ class MockWebPaneColumn(QFrame):
 class UISandboxRunner(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Nexus AI Orchestrator — UI Component Sandbox")
+        self.setWindowTitle("Nexus AI Orchestrator - UI Component Sandbox")
         self.resize(1640, 940)
         self._apply_theme()
         self._build_sandbox()
@@ -328,7 +328,7 @@ class UISandboxRunner(QMainWindow):
                     if idx < len(workers) - 1:
                         t_train.activate_gate(idx, [f"C:/mock_build/stage_{idx+1}_output.py"])
                     else:
-                        t_train.set_progress(100, "Pipeline Complete — ZIP Built")
+                        t_train.set_progress(100, "Pipeline Complete - ZIP Built")
 
         t_train.relay_gate_approved.connect(_sim_gate_advance)
         t_train.force_stage_complete.connect(_sim_force_complete)

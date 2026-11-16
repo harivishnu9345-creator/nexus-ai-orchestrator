@@ -1,4 +1,4 @@
-﻿import uuid
+import uuid
 from typing import List, Dict, Any
 from PyQt6.QtCore import QObject, QTimer, QTime, QDateTime, pyqtSignal
 from core.injector import DOMInjector

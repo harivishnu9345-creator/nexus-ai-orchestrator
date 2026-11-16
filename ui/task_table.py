@@ -1,4 +1,4 @@
-﻿from PyQt6.QtCore import Qt, pyqtSignal, QDateTime, QTime
+from PyQt6.QtCore import Qt, pyqtSignal, QDateTime, QTime
 from PyQt6.QtGui import QColor, QBrush, QFont
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,

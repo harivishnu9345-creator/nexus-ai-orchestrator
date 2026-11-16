@@ -1,4 +1,4 @@
-﻿import os
+import os
 import re
 import zipfile
 import subprocess
@@ -19,7 +19,7 @@ class CodeHarvester(QObject):
 
         self.project_map: Dict[str, Dict[str, str]] = {}
 
-        # Tier 1: Explicit ===FILE: filename.ext=== followed by ``` block (allows optional language/header lines)
+        # Tier 1: Explicit ={1,3}\s*FILE: filename.ext=== followed by ``` block (allows optional language/header lines)
         self.file_block_pattern = re.compile(
             r"===\s*FILE\s*:\s*([^\n=]+?)\s*===\s*(?:[^\n`]*\n)*?```[^\n]*\n(.*?)```",
             re.DOTALL | re.IGNORECASE
@@ -38,7 +38,7 @@ class CodeHarvester(QObject):
         )
 
         self.summary_pattern = re.compile(
-            r"===\s*SUMMARY\s*===\s*(.*?)===\s*END_SUMMARY\s*===",
+            r"===\s*SUMMARY\s*===\s*(.*?)={1,3}\s*END_SUMMARY\s*===",
             re.DOTALL | re.IGNORECASE
         )
 
@@ -52,7 +52,7 @@ class CodeHarvester(QObject):
         return target_dir
 
     def _extract_file_pairs(self, raw_text: str, worker_map: Dict[str, str]) -> List[Tuple[str, str]]:
-        # Pass 1: Strict ===FILE: name=== blocks
+        # Pass 1: Strict ={1,3}\s*FILE: name=== blocks
         matches = self.file_block_pattern.findall(raw_text)
         if matches:
             return matches

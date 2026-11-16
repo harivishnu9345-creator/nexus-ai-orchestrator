@@ -1,4 +1,8 @@
-﻿import sys
+import os as _os, sys as _sys
+_os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = "--disable-blink-features=AutomationControlled --disable-features=WebAuthentication,WebAuth"
+_sys.argv.append("--disable-blink-features=AutomationControlled")
+_sys.argv.append("--disable-features=WebAuthentication")
+import sys
 import json
 import os
 from PyQt6.QtWidgets import QApplication, QDialog
@@ -11,7 +15,7 @@ from ui.main_window import MainWindow
 def load_config(config_path="config.json"):
     if os.path.exists(config_path):
         try:
-            with open(config_path, "r", encoding="utf-8") as f:
+            with open(config_path, "r", encoding="utf-8-sig") as f:
                 return json.load(f)
         except Exception as e:
             print(f"Error loading config.json: {e}")
@@ -108,3 +112,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
