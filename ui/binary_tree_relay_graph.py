@@ -20,7 +20,7 @@ TEMPLATE_DUMMY_FILENAMES = {
 
 
 class ZoomableGraphView(QGraphicsView):
-    """QGraphicsView with mouse-wheel and touchpad two-finger pinch zoom."""
+    """QGraphicsView with smooth click-and-drag panning on empty space and pinch zoom."""
 
     def __init__(self, scene: QGraphicsScene, parent=None):
         super().__init__(scene, parent)
@@ -35,6 +35,14 @@ class ZoomableGraphView(QGraphicsView):
         self.viewport().setAttribute(Qt.WidgetAttribute.WA_AcceptTouchEvents, True)
         self.grabGesture(Qt.GestureType.PinchGesture)
         self.viewport().grabGesture(Qt.GestureType.PinchGesture)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            item = self.itemAt(event.pos())
+            if item is None:
+                # Clicked on empty space: engage smooth grab-and-pan
+                self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
+        super().mousePressEvent(event)
 
     def _apply_zoom(self, factor: float):
         factor = max(0.86, min(1.16, factor))

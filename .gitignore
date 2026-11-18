@@ -1,0 +1,29 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Personal Workspace, Browser Profiles, and Harvested Builds (NEVER COMMIT)
+.nexus_orchestrator/
+profiles/
+sessions/
+projects/
+builds/
+Nexus_Compiled_Workspaces/
+_live_cache/
+*.zip
+
+# Local temporary patch / MCP scripts
+_fix_*.py
+nexus_dev_mcp.py
+
+# OS / IDE files
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store

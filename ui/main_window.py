@@ -746,17 +746,55 @@ class MainWindow(QMainWindow):
         self.input_prompt.clear()
 
     def _on_extract_and_delegate(self):
-        master_id = self.combo_master.currentData()
-        self.active_master_id = master_id
-        self.workspace_data["master_node_id"] = master_id
-        if master_id not in self.panes:
+        # Automatically find whichever open pane contains the blueprint (===TASK_START=== or ===MAP_START===)
+        panes = getattr(self, "panes", {})
+        if not panes:
             return
 
-        master_pane = self.panes[master_id]
-        DOMScraper.scrape_page_text(
-            master_pane.get_page(),
-            lambda raw_text: self._process_master_blueprint(master_id, raw_text)
-        )
+        master_id = self.combo_master.currentData()
+        if master_id not in panes:
+            master_id = list(panes.keys())[0]
+
+        # Scan all panes in parallel to find the one with the blueprint
+        results = {}
+        pending = len(panes)
+        scraped_master_id = [master_id]
+
+        def _check_all():
+            chosen_id = scraped_master_id[0]
+            chosen_txt = results.get(chosen_id, "")
+            if "TASK_START" not in chosen_txt:
+                for aid, txt in results.items():
+                    if "TASK_START" in txt or "MAP_START" in txt:
+                        chosen_id = aid
+                        chosen_txt = txt
+                        break
+
+            if "TASK_START" not in chosen_txt and hasattr(self, "_fallback_extract_and_delegate_from_any_master"):
+                self._fallback_extract_and_delegate_from_any_master()
+                return
+
+            self.active_master_id = chosen_id
+            self.workspace_data["master_node_id"] = chosen_id
+            m_idx = self.combo_master.findData(chosen_id)
+            if m_idx >= 0:
+                self.combo_master.blockSignals(True)
+                self.combo_master.setCurrentIndex(m_idx)
+                self.combo_master.blockSignals(False)
+
+            self._process_master_blueprint(chosen_id, chosen_txt)
+
+        for aid, pane in panes.items():
+            def _make_cb(acc_id=aid):
+                nonlocal pending
+                def _on_txt(t):
+                    nonlocal pending
+                    results[acc_id] = t or ""
+                    pending -= 1
+                    if pending == 0:
+                        _check_all()
+                return _on_txt
+            DOMScraper.scrape_page_text(pane.get_page(), _make_cb(aid))
 
     def _process_master_blueprint(self, master_id: str, raw_text: str):
         master_acc = next((a for a in self.accounts if a["id"] == master_id), self.accounts[0])
@@ -1428,6 +1466,26 @@ class MainWindow(QMainWindow):
     def _on_pane_url_changed(self, account_id: str, new_url: str):
         if not new_url or "login" in new_url.lower() or "accounts.google.com" in new_url.lower():
             return
+        
+        # NEVER overwrite a valid active chat session URL with a generic landing URL like claude.ai/new
+        lower_u = new_url.lower()
+        is_generic_landing = (
+            lower_u.endswith("/new") or 
+            lower_u.endswith("/app") or 
+            lower_u == "https://claude.ai" or 
+            lower_u == "https://claude.ai/" or 
+            lower_u == "https://gemini.google.com" or 
+            lower_u == "https://gemini.google.com/"
+        )
+        
+        proj = self._get_active_project_dict()
+        node_urls = proj.setdefault("node_urls", {})
+        existing_u = node_urls.get(account_id, "")
+        
+        if is_generic_landing and existing_u and not existing_u.lower().endswith(("/new", "/app")):
+            return  # Ignore generic redirect so active chat URL is preserved!
+
+        node_urls[account_id] = new_url
         self.session_mgr.update_last_url(account_id, new_url)
         for acc in self.accounts:
             if acc.get("id") == account_id:
