@@ -1246,10 +1246,25 @@ class MainWindow(QMainWindow):
                 return
             key = fname.lower()
             bucket = versions_by_file.setdefault(key, [])
-            for existing in bucket:
-                if existing["hash"] == h and existing["account"] == account_label:
+            # Keep only ONE latest/largest version per account (prevents false same-account duplicates)
+            for idx_e, existing in enumerate(bucket):
+                if existing["account"] == account_label:
+                    if len(raw_b) >= existing.get("size", 0):
+                        bucket[idx_e] = {
+                            "filename": fname,
+                            "account": account_label,
+                            "path": os.path.abspath(fpath),
+                            "hash": h,
+                            "size": len(raw_b),
+                        }
                     return
-            bucket.append({"filename": fname, "account": account_label, "path": os.path.abspath(fpath), "hash": h})
+            bucket.append({
+                "filename": fname,
+                "account": account_label,
+                "path": os.path.abspath(fpath),
+                "hash": h,
+                "size": len(raw_b),
+            })
 
         def _finalize_bundle():
             # Source 2: harvested_stage_files
@@ -1294,7 +1309,16 @@ class MainWindow(QMainWindow):
                 active_vers = named_vers if named_vers else vers
                 latest = active_vers[-1]
                 fname = latest["filename"]
-                dst_primary = os.path.join(build_dir, fname)
+                rel_sub = fname
+                norm_p = os.path.abspath(latest["path"])
+                if "_live_cache" in norm_p:
+                    parts_after = norm_p.split("_live_cache" + os.sep, 1)[-1].split(os.sep, 1)
+                    if len(parts_after) == 2:
+                        rel_sub = parts_after[1]
+                elif norm_p.startswith(os.path.abspath(build_dir) + os.sep):
+                    rel_sub = os.path.relpath(norm_p, os.path.abspath(build_dir))
+                dst_primary = os.path.join(build_dir, rel_sub)
+                os.makedirs(os.path.dirname(dst_primary), exist_ok=True)
 
                 try:
                     if os.path.abspath(latest["path"]) != os.path.abspath(dst_primary):
@@ -1308,7 +1332,7 @@ class MainWindow(QMainWindow):
                     if v["account"] not in accounts_involved:
                         accounts_involved.append(v["account"])
 
-                if len(active_vers) > 1:
+                if len(accounts_involved) > 1:
                     os.makedirs(dup_dir, exist_ok=True)
                     stem, ext = os.path.splitext(fname)
                     for idx_v, v in enumerate(active_vers, start=1):
@@ -1360,8 +1384,16 @@ class MainWindow(QMainWindow):
                         if os.path.basename(fp).lower() not in TEMPLATE_DUMMY_FILENAMES
                     ]
                     alabel = acc_name_map.get(acc_id, acc_id)
+                    assigned_bases = {
+                        os.path.basename(x.strip()).lower()
+                        for x in self.assigned_files_display.get(acc_id, [])
+                        if x and x.strip()
+                    }
                     for fp in files:
-                        self.binary_tree_graph.on_file_harvested_live(acc_id, os.path.basename(fp), fp)
+                        bname = os.path.basename(fp)
+                        if assigned_bases and bname.lower() not in assigned_bases:
+                            continue
+                        self.binary_tree_graph.on_file_harvested_live(acc_id, bname, fp)
                         _record_file(fp, alabel)
                     remaining[0] -= 1
                     if remaining[0] <= 0:

@@ -147,3 +147,134 @@ class CodeHarvester(QObject):
             subprocess.Popen(["code", build_dir], shell=True)
         except Exception:
             os.startfile(build_dir)
+# NEXUS_HARVESTER_V22
+import zipfile as _v22_zipfile
+
+
+def sanitize_relative_filepath_v22(raw_name: str) -> str:
+    """Clean trailing notes like '(MAIN world)', backticks, quotes, and preserve safe subpaths."""
+    if not raw_name:
+        return ""
+    s = raw_name.strip().strip("`\"'* ")
+    # Strip trailing parenthetical annotations e.g. "permission-hook.js (MAIN world)"
+    s = re.sub(r"\s*\([^)]*\)\s*$", "", s).strip()
+    # Strip trailing comments after " - " or " — "
+    s = re.split(r"\s+[-—–]\s+", s)[0].strip()
+    s = s.replace("\\", "/").lstrip("/")
+    parts = [p.strip() for p in s.split("/") if p.strip() and p.strip() not in (".", "..")]
+    clean_parts = []
+    for p in parts:
+        p = re.sub(r'[<>:"|?*]', "", p).strip()
+        if p:
+            clean_parts.append(p)
+    if not clean_parts:
+        return ""
+    # Final segment must look like a real filename with extension (or Dockerfile/Makefile)
+    leaf = clean_parts[-1]
+    if "." not in leaf and leaf.lower() not in ("dockerfile", "makefile", "license", "procfile"):
+        return ""
+    return os.path.join(*clean_parts)
+
+
+def _looks_like_spec_not_code_v22(fname: str, content: str) -> bool:
+    """Reject Master prompt/spec blocks mistakenly harvested as source code."""
+    low = (content or "").strip().lower()
+    if len(low) < 5:
+        return True
+    spec_markers = (
+        "exports (exact signatures):",
+        "undo/set payloads (exact):",
+        "===task_start:",
+        "===map_start===",
+        "upstream files attached for your reference:",
+    )
+    if any(m in low for m in spec_markers):
+        return True
+    return False
+
+
+_orig_parse_and_write = CodeHarvester.parse_and_write_files
+
+
+def _v22_parse_and_write_files(self, text: str, project_name: str, account_id: str = ""):
+    """Preserve relative subpaths, sanitize filenames, and reject prompt-spec false positives."""
+    if not text:
+        return []
+    build_dir = self.get_project_build_dir(project_name)
+    os.makedirs(build_dir, exist_ok=True)
+    written = []
+
+    # Match ===FILE: path/to/file.ext=== ... until next ===FILE: or ===END_FILE=== or ===SUMMARY===
+    pattern = re.compile(
+        r"===\s*FILE\s*:\s*([^\r\n=]+?)\s*===\s*(.*?)(?=(?:===\s*(?:FILE\s*:|END_FILE|SUMMARY|TASK_END))|\Z)",
+        re.DOTALL | re.IGNORECASE
+    )
+    matches = list(pattern.finditer(text))
+    if not matches:
+        # Fallback to original parser, then sanitize any written paths
+        raw_files = _orig_parse_and_write(self, text, project_name, account_id)
+        for fp in raw_files:
+            if not os.path.isfile(fp):
+                continue
+            try:
+                with open(fp, "r", encoding="utf-8", errors="ignore") as rf:
+                    body = rf.read()
+                if _looks_like_spec_not_code_v22(os.path.basename(fp), body):
+                    os.remove(fp)
+                    continue
+            except Exception:
+                pass
+            written.append(fp)
+        return written
+
+    for m in matches:
+        raw_rel = m.group(1).strip()
+        body = m.group(2).strip()
+        # Strip surrounding markdown code fences if present
+        fence = re.match(r"^```[a-zA-Z0-9_+-]*\s*\n(.*?)\n```\s*$", body, re.DOTALL)
+        if fence:
+            body = fence.group(1)
+
+        rel_path = sanitize_relative_filepath_v22(raw_rel)
+        if not rel_path or _looks_like_spec_not_code_v22(rel_path, body):
+            continue
+
+        # Store inside account live_cache preserving relative subdirectories
+        safe_proj = re.sub(r"[^a-zA-Z0-9_-]", "_", project_name or "project")
+        safe_acc = re.sub(r"[^a-zA-Z0-9_-]", "_", account_id or "node")
+        cache_root = os.path.abspath(os.path.join("builds", safe_proj, "_live_cache", safe_acc))
+        cache_path = os.path.join(cache_root, rel_path)
+        os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+        with open(cache_path, "w", encoding="utf-8") as wf:
+            wf.write(body + "\n")
+
+        # Also mirror into build_dir preserving subdirectory structure
+        dst_path = os.path.join(build_dir, rel_path)
+        os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+        with open(dst_path, "w", encoding="utf-8") as wf:
+            wf.write(body + "\n")
+
+        written.append(dst_path)
+
+    return written
+
+
+def _v22_create_project_zip(self, project_name: str) -> str:
+    """Create ZIP preserving full relative subfolder structure (manifest.json safe)."""
+    build_dir = self.get_project_build_dir(project_name)
+    os.makedirs(build_dir, exist_ok=True)
+    safe_proj = re.sub(r"[^a-zA-Z0-9_-]", "_", project_name or "project")
+    zip_path = os.path.join(os.path.dirname(build_dir), f"{safe_proj}.zip")
+    with _v22_zipfile.ZipFile(zip_path, "w", _v22_zipfile.ZIP_DEFLATED) as zf:
+        for root_d, _dirs, files in os.walk(build_dir):
+            for fn in files:
+                if fn.endswith(".zip"):
+                    continue
+                full_p = os.path.join(root_d, fn)
+                arcname = os.path.relpath(full_p, build_dir)
+                zf.write(full_p, arcname)
+    return zip_path
+
+
+CodeHarvester.parse_and_write_files = _v22_parse_and_write_files
+CodeHarvester.create_project_zip = _v22_create_project_zip
