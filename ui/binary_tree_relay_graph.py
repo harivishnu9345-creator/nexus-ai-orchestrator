@@ -640,6 +640,9 @@ class TreeGraphNodeItem(QGraphicsObject):
         if st in ("TOKEN_EXHAUSTED", "EXHAUSTED"):
             border_col = QColor("#a855f7")  # Bright Purple (Token Exhausted)
             hdr_bg = QColor("#3b0764")
+        elif st in ("NEEDS_RETRY", "REFUSED", "FAILED"):
+            border_col = QColor("#f59e0b")  # Amber/Orange (Needs Retry / Refusal)
+            hdr_bg = QColor("#451a03")
         elif st in ("COMPLETED", "CACHED", "VERIFIED", "DONE"):
             border_col = QColor("#10b981")  # Bright Green
             hdr_bg = QColor("#052e16")
@@ -905,12 +908,13 @@ class BinaryTreeRelayGraphWidget(QWidget):
         btn_fire_top.clicked.connect(self.fire_all_pending_gates)
         sl.addWidget(btn_fire_top)
 
-        self.btn_token_exhaust_graph = QPushButton("\u26a1 If Token Exhaust")
-        self.btn_token_exhaust_graph.setStyleSheet("background-color: #7e22ce; color: #ffffff; border: 1px solid #a855f7;")
+        self.btn_token_exhaust_graph = QPushButton("\u26a1 Token Exhaust")
+        self.btn_token_exhaust_graph.setStyleSheet("background-color: #7e22ce; color: #ffffff; border: 1px solid #a855f7; padding: 3px 8px; font-size: 11px;")
         self.btn_token_exhaust_graph.clicked.connect(self.token_exhaust_requested.emit)
         sl.addWidget(self.btn_token_exhaust_graph)
 
-        btn_rebalance = QPushButton("\U0001f332 Fit Graph")
+        btn_rebalance = QPushButton("\U0001f332 Fit")
+        btn_rebalance.setStyleSheet("padding: 3px 8px; font-size: 11px;")
         btn_rebalance.clicked.connect(self.center_and_fit_readable)
         sl.addWidget(btn_rebalance)
 
@@ -1940,3 +1944,41 @@ class BinaryTreeRelayGraphWidget(QWidget):
                 self.failover_links.append((exhausted_id, nid, list(remaining_files or [])))
         self.rebuild_and_layout_graph()
         self.recompute_true_progress(f"Failover Branch Active ({len(new_accounts)} new node(s) added)")
+# NEXUS_GRAPH_LAYOUT_V22
+if hasattr(BinaryTreeRelayGraphWidget, "on_file_harvested_live"):
+    _orig_on_harvested_live_v22 = BinaryTreeRelayGraphWidget.on_file_harvested_live
+
+    def _dedup_on_file_harvested_live_v22(self, account_id: str, filename: str, filepath: str):
+        clean_fn = os.path.basename((filename or "").strip())
+        if not clean_fn:
+            return
+        # Deduplicate case-insensitively on the node card before delegating
+        node = self.node_items.get(account_id)
+        if node is not None and hasattr(node, "cached_files") and isinstance(node.cached_files, dict):
+            for existing_k in list(node.cached_files.keys()):
+                if existing_k.lower() == clean_fn.lower() and existing_k != clean_fn:
+                    node.cached_files.pop(existing_k, None)
+        return _orig_on_harvested_live_v22(self, account_id, clean_fn, filepath)
+
+    BinaryTreeRelayGraphWidget.on_file_harvested_live = _dedup_on_file_harvested_live_v22
+
+
+if hasattr(BinaryTreeRelayGraphWidget, "rebuild_and_layout_graph"):
+    _orig_rebuild_layout_v22 = BinaryTreeRelayGraphWidget.rebuild_and_layout_graph
+
+    def _spaced_rebuild_layout_v22(self, *args, **kwargs):
+        res = _orig_rebuild_layout_v22(self, *args, **kwargs)
+        # Expand spacing between L1/L2 columns & Gate Cards so cards never collide
+        try:
+            for item in self.scene.items():
+                cls_name = item.__class__.__name__
+                if "Gate" in cls_name or cls_name == "TreeGraphNodeItem":
+                    pos = item.pos()
+                    item.setPos(pos.x() * 1.28, pos.y() * 1.22)
+            self._update_all_edge_positions()
+            self.center_and_fit_readable()
+        except Exception:
+            pass
+        return res
+
+    BinaryTreeRelayGraphWidget.rebuild_and_layout_graph = _spaced_rebuild_layout_v22

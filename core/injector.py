@@ -358,3 +358,46 @@ class DOMInjector:
             input_sel = "div.ProseMirror[contenteditable='true'], div[contenteditable='true'].ProseMirror, div[contenteditable='true'][role='textbox'], div[contenteditable='true'], textarea"
             send_sel = "button[aria-label*='Send' i], button[data-testid='send-button']"
         return input_sel, send_sel
+# NEXUS_INLINE_ATTACHMENT_FALLBACK_V22
+import os as _v22_os
+
+
+def _build_inline_file_bundle_v22(file_paths, max_total_chars: int = 45000) -> str:
+    """Build guaranteed inline context blocks so downstream models NEVER see missing attachments."""
+    blocks = []
+    used = 0
+    for fp in (file_paths or []):
+        if not fp or not _v22_os.path.isfile(fp):
+            continue
+        try:
+            with open(fp, "r", encoding="utf-8", errors="ignore") as rf:
+                content = rf.read()
+        except Exception:
+            continue
+        if used + len(content) > max_total_chars:
+            content = content[: max(0, max_total_chars - used)] + "\n/* [TRUNCATED FOR CONTEXT BUDGET] */"
+        fname = _v22_os.path.basename(fp)
+        blocks.append(f"===ATTACHED_FILE: {fname}===\n{content}\n===END_ATTACHED_FILE===")
+        used += len(content)
+        if used >= max_total_chars:
+            break
+    if not blocks:
+        return ""
+    return (
+        "\n\n[VERIFIED UPSTREAM FILE CONTENTS - PROVIDED INLINE FOR RELIABILITY]\n"
+        + "\n\n".join(blocks)
+        + "\n"
+    )
+
+
+if hasattr(DOMInjector, "send_multi_files"):
+    _orig_send_multi_v22 = DOMInjector.send_multi_files
+
+    def _reliable_send_multi_files_v22(self, page, platform, prompt_text, file_paths, *args, **kwargs):
+        valid_paths = [p for p in (file_paths or []) if p and _v22_os.path.isfile(p)]
+        enriched_prompt = prompt_text or ""
+        if valid_paths and "===ATTACHED_FILE:" not in enriched_prompt:
+            enriched_prompt = enriched_prompt + _build_inline_file_bundle_v22(valid_paths)
+        return _orig_send_multi_v22(self, page, platform, enriched_prompt, valid_paths, *args, **kwargs)
+
+    DOMInjector.send_multi_files = _reliable_send_multi_files_v22

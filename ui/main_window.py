@@ -1357,7 +1357,7 @@ class MainWindow(QMainWindow):
                 pass
 
             zip_path = self.harvester.create_project_zip(project_name)
-            self.binary_tree_graph.set_progress(100, f"Harvested {len(written_primary)} file(s) -> {os.path.basename(zip_path)}")
+            self.binary_tree_graph.recompute_true_progress(f"Harvested {len(written_primary)} file(s) -> {os.path.basename(zip_path)}")
 
             dup_summary = ""
             if duplicate_notes:
@@ -2045,3 +2045,106 @@ class MainWindow(QMainWindow):
         self.combo_target.addItem(label, acc_id)
         self.combo_master.addItem(label, acc_id)
         return new_acc
+# NEXUS_COMPLETION_GUARD_V22
+_REFUSAL_PHRASES_V22 = (
+    "no attachments",
+    "no files came through",
+    "none of the upstream files are in this conversation",
+    "can't write these files yet",
+    "cannot write these files yet",
+    "please paste the contents of",
+    "message has no attachments",
+    "found no attachments",
+)
+
+
+def _is_refusal_text_v22(text: str) -> bool:
+    low = (text or "").lower()
+    return any(p in low for p in _REFUSAL_PHRASES_V22)
+
+
+if hasattr(MainWindow, "_on_worker_generation_complete"):
+    _orig_worker_done_v22 = MainWindow._on_worker_generation_complete
+
+    def _guarded_worker_done_v22(self, account_id: str, *args, **kwargs):
+        pane = self.panes.get(account_id)
+        if pane is None:
+            return _orig_worker_done_v22(self, account_id, *args, **kwargs)
+
+        def _verify_then_complete(scraped_text: str):
+            project_name = self.input_project_name.text().strip() or self.project_name
+            assigned_bases = {
+                os.path.basename(x.strip()).lower()
+                for x in self.assigned_files_display.get(account_id, [])
+                if x and x.strip()
+            }
+            fresh_files = self.harvester.parse_and_write_files(scraped_text or "", project_name, account_id)
+            owned_files = [
+                fp for fp in fresh_files
+                if (not assigned_bases) or (os.path.basename(fp).lower() in assigned_bases)
+            ]
+
+            if _is_refusal_text_v22(scraped_text) or (assigned_bases and len(owned_files) == 0):
+                # Mark NEEDS_RETRY (Amber) instead of COMPLETED (Green)
+                self.current_node_statuses[account_id] = "needs_retry"
+                self.current_stage_statuses[account_id] = "needs_retry"
+                if hasattr(self, "binary_tree_graph"):
+                    self.binary_tree_graph.set_stage_status(account_id, "NEEDS_RETRY")
+                    self.binary_tree_graph.recompute_true_progress(
+                        f"Stage {account_id} flagged NEEDS_RETRY (0 assigned files / refusal detected)"
+                    )
+                if hasattr(self, "mind_map_tab") and hasattr(self.mind_map_tab, "update_node_status"):
+                    self.mind_map_tab.update_node_status(account_id, "needs_retry")
+                return
+
+            return _orig_worker_done_v22(self, account_id, *args, **kwargs)
+
+        DOMScraper.scrape_page_text(pane.get_page(), _verify_then_complete)
+
+    MainWindow._on_worker_generation_complete = _guarded_worker_done_v22
+# NEXUS_SUMMARY_PERSISTENCE_V22
+def _extract_summary_block_v22(text: str) -> str:
+    if not text:
+        return ""
+    m = re.search(
+        r"===\s*SUMMARY\s*===\s*(.*?)(?=(?:===\s*(?:END_SUMMARY|FILE\s*:|TASK_END))|\Z)",
+        text,
+        re.DOTALL | re.IGNORECASE
+    )
+    if m and m.group(1).strip():
+        return m.group(1).strip()[:4000]
+    return ""
+
+
+if hasattr(MainWindow, "_on_worker_generation_complete"):
+    _prev_done_v22 = MainWindow._on_worker_generation_complete
+
+    def _summary_capturing_done_v22(self, account_id: str, *args, **kwargs):
+        if not hasattr(self, "stage_summaries"):
+            self.stage_summaries = {}
+        pane = self.panes.get(account_id)
+        if pane is not None:
+            def _save_sum(txt: str):
+                s = _extract_summary_block_v22(txt or "")
+                if s:
+                    self.stage_summaries[account_id] = s
+                    if hasattr(self, "binary_tree_graph") and hasattr(self.binary_tree_graph, "stage_summaries"):
+                        self.binary_tree_graph.stage_summaries[account_id] = s
+            DOMScraper.scrape_page_text(pane.get_page(), _save_sum)
+        return _prev_done_v22(self, account_id, *args, **kwargs)
+
+    MainWindow._on_worker_generation_complete = _summary_capturing_done_v22
+
+
+if hasattr(MainWindow, "_relay_to_downstream_stage"):
+    _orig_relay_v22 = MainWindow._relay_to_downstream_stage
+
+    def _summary_injecting_relay_v22(self, *args, **kwargs):
+        # Ensure stage_summaries dict is synced onto binary_tree_graph before relay
+        if hasattr(self, "stage_summaries") and hasattr(self, "binary_tree_graph"):
+            if not hasattr(self.binary_tree_graph, "stage_summaries"):
+                self.binary_tree_graph.stage_summaries = {}
+            self.binary_tree_graph.stage_summaries.update(self.stage_summaries)
+        return _orig_relay_v22(self, *args, **kwargs)
+
+    MainWindow._relay_to_downstream_stage = _summary_injecting_relay_v22
