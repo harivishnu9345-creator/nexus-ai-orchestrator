@@ -516,3 +516,17 @@ class SwarmMindMapWidget(QWidget):
             scale = max(0.50, min(sx, sy, 1.02))
             self.view.scale(scale, scale)
         self.view.centerOn(rect.center())
+    def mark_node_token_exhausted(self, account_id: str):
+        if hasattr(self, "update_node_status"):
+            self.update_node_status(account_id, "token_exhausted")
+        # Also force purple styling directly on any matching graphics item if present
+        for attr in ("node_items", "nodes"):
+            mapping = getattr(self, attr, None)
+            if isinstance(mapping, dict) and account_id in mapping:
+                item = mapping[account_id]
+                if hasattr(item, "status"):
+                    item.status = "TOKEN_EXHAUSTED"
+                if hasattr(item, "border_color"):
+                    item.border_color = QColor("#a855f7")
+                if hasattr(item, "update"):
+                    item.update()

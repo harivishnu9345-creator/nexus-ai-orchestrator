@@ -148,7 +148,9 @@ class PrimaryTreeEdgeItem(QGraphicsPathItem):
             else:
                 line_col = QColor("#52525b")
         else:
-            if t_stat in ("COMPLETED", "CACHED", "VERIFIED", "DONE", "RELAYED"):
+            if t_stat in ("TOKEN_EXHAUSTED", "EXHAUSTED") or s_stat in ("TOKEN_EXHAUSTED", "EXHAUSTED"):
+                line_col = QColor("#a855f7")  # Bright Purple (Token Exhausted)
+            elif t_stat in ("COMPLETED", "CACHED", "VERIFIED", "DONE", "RELAYED"):
                 line_col = QColor("#10b981")  # Bright Green
             elif t_stat in ("RUNNING", "GENERATING", "VERIFYING", "ACTIVE", "AWAITING_APPROVAL"):
                 line_col = QColor("#f97316")  # Bright Orange
@@ -486,6 +488,65 @@ class InlineGateCardItem(QGraphicsObject):
         super().mousePressEvent(event)
 
 
+class FailoverBranchEdgeItem(QGraphicsPathItem):
+    """Purple failover branch line connecting a TOKEN_EXHAUSTED node to its newly added replacement node."""
+
+    def __init__(self, source_node: QGraphicsObject, target_node: QGraphicsObject, remaining_files: List[str]):
+        super().__init__()
+        self.source_node = source_node
+        self.target_node = target_node
+        self.remaining_files = list(remaining_files or [])
+        self._pill_rect = QRectF()
+        self.setZValue(6)
+        self.update_position()
+
+    def boundingRect(self) -> QRectF:
+        return super().boundingRect().united(self._pill_rect).adjusted(-18.0, -18.0, 18.0, 18.0)
+
+    def update_position(self):
+        if not self.source_node or not self.target_node:
+            return
+        self.prepareGeometryChange()
+        s_rect = self.source_node.sceneBoundingRect()
+        t_rect = self.target_node.sceneBoundingRect()
+        start = QPointF(s_rect.right(), s_rect.center().y())
+        end = QPointF(t_rect.left(), t_rect.center().y())
+        dx = max(45.0, abs(end.x() - start.x()) * 0.45)
+        c1 = QPointF(start.x() + dx, start.y() - 35.0)
+        c2 = QPointF(end.x() - dx, end.y() - 35.0)
+        path = QPainterPath(start)
+        path.cubicTo(c1, c2, end)
+        self.setPath(path)
+
+        mid = path.pointAtPercent(0.5)
+        self._pill_rect = QRectF(mid.x() - 105.0, mid.y() - 11.0, 210.0, 22.0)
+
+    def paint(self, painter: QPainter, option, widget=None):
+        path = self.path()
+        if path.isEmpty():
+            return
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        purple = QColor("#a855f7")
+
+        painter.setPen(QPen(QColor(168, 85, 247, 70), 6.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawPath(path)
+
+        painter.setPen(QPen(purple, 2.6, Qt.PenStyle.DashLine, Qt.PenCapStyle.RoundCap))
+        painter.drawPath(path)
+
+        painter.setBrush(QBrush(QColor("#3b0764")))
+        painter.setPen(QPen(purple, 1.5))
+        painter.drawRoundedRect(self._pill_rect, 7.0, 7.0)
+
+        files_preview = ", ".join(self.remaining_files[:2]) if self.remaining_files else "Remaining Tasks"
+        if len(self.remaining_files) > 2:
+            files_preview += f" +{len(self.remaining_files) - 2}"
+        painter.setPen(QPen(QColor("#f3e8ff")))
+        painter.setFont(QFont("Segoe UI", 7, QFont.Weight.Bold))
+        painter.drawText(self._pill_rect, Qt.AlignmentFlag.AlignCenter, f"⚡ FAILOVER: {files_preview[:24]}")
+
+
 class TreeGraphNodeItem(QGraphicsObject):
     """
     Rich Node Card:
@@ -576,7 +637,10 @@ class TreeGraphNodeItem(QGraphicsObject):
         rect = QRectF(0, 0, self.WIDTH, h)
 
         st = self.status.upper()
-        if st in ("COMPLETED", "CACHED", "VERIFIED", "DONE"):
+        if st in ("TOKEN_EXHAUSTED", "EXHAUSTED"):
+            border_col = QColor("#a855f7")  # Bright Purple (Token Exhausted)
+            hdr_bg = QColor("#3b0764")
+        elif st in ("COMPLETED", "CACHED", "VERIFIED", "DONE"):
             border_col = QColor("#10b981")  # Bright Green
             hdr_bg = QColor("#052e16")
         elif st in ("RUNNING", "GENERATING", "VERIFYING", "ACTIVE"):
@@ -719,6 +783,7 @@ class BinaryTreeRelayGraphWidget(QWidget):
     strategy_topology_changed = pyqtSignal(str)
     force_stage_complete = pyqtSignal(str)
     session_selected = pyqtSignal(int)
+    token_exhaust_requested = pyqtSignal()
 
     def __init__(
         self,
@@ -745,6 +810,8 @@ class BinaryTreeRelayGraphWidget(QWidget):
         self.ordered_node_ids: List[str] = []
         self.primary_edges: List[PrimaryTreeEdgeItem] = []
         self.request_edges: List[PerimeterRequestEdgeItem] = []
+        self.failover_links: List[Tuple[str, str, List[str]]] = []
+        self.failover_edges: List[FailoverBranchEdgeItem] = []
         self.harvest_cache: Dict[str, Dict[str, str]] = {}
 
         self._active_inspector_gate_idx: int = 0
@@ -838,6 +905,11 @@ class BinaryTreeRelayGraphWidget(QWidget):
         btn_fire_top.clicked.connect(self.fire_all_pending_gates)
         sl.addWidget(btn_fire_top)
 
+        self.btn_token_exhaust_graph = QPushButton("\u26a1 If Token Exhaust")
+        self.btn_token_exhaust_graph.setStyleSheet("background-color: #7e22ce; color: #ffffff; border: 1px solid #a855f7;")
+        self.btn_token_exhaust_graph.clicked.connect(self.token_exhaust_requested.emit)
+        sl.addWidget(self.btn_token_exhaust_graph)
+
         btn_rebalance = QPushButton("\U0001f332 Fit Graph")
         btn_rebalance.clicked.connect(self.center_and_fit_readable)
         sl.addWidget(btn_rebalance)
@@ -921,15 +993,21 @@ class BinaryTreeRelayGraphWidget(QWidget):
             self.rb_parallel.blockSignals(False)
 
     def recompute_true_progress(self, prefix_msg: str = ""):
-        total_w = max(1, len(self.worker_accounts))
+        handed_off_ids = {src_id for src_id, _dst, _files in getattr(self, "failover_links", [])}
+        active_workers = [
+            w for w in self.worker_accounts
+            if not (w.get("id") in handed_off_ids and self.stage_statuses_map.get(w.get("id"), "").upper() in ("TOKEN_EXHAUSTED", "EXHAUSTED"))
+        ]
+        total_w = max(1, len(active_workers))
         done_w = 0
-        for w in self.worker_accounts:
+        for w in active_workers:
             wid = w.get("id")
             if wid in self.node_items and self.node_items[wid].status in ("COMPLETED", "CACHED", "VERIFIED", "DONE"):
                 done_w += 1
         pct = int((done_w / total_w) * 100)
-        msg = prefix_msg or f"Pipeline Progress: {done_w}/{total_w} Stage(s) Completed ({pct}%)"
+        msg = prefix_msg or f"Pipeline Progress: {done_w}/{total_w} Active Stage(s) Completed ({pct}%)"
         self.set_progress(pct, msg)
+
 
     def _apply_strategy_change(self):
         topo = self.get_strategy_topology()
@@ -1331,6 +1409,7 @@ class BinaryTreeRelayGraphWidget(QWidget):
         self.inline_gate_items.clear()
         self.primary_edges.clear()
         self.request_edges.clear()
+        self.failover_edges.clear()
 
         total_nodes = len(ordered_ids)
         worker_count = max(0, total_nodes - 1)
@@ -1569,6 +1648,15 @@ class BinaryTreeRelayGraphWidget(QWidget):
                 self.scene.addItem(edge)
                 self.primary_edges.append(edge)
 
+        for f_edge in self.failover_edges:
+            self.scene.removeItem(f_edge)
+        self.failover_edges.clear()
+        for src_id, dst_id, rem_files in self.failover_links:
+            if src_id in self.node_items and dst_id in self.node_items:
+                fe = FailoverBranchEdgeItem(self.node_items[src_id], self.node_items[dst_id], rem_files)
+                self.scene.addItem(fe)
+                self.failover_edges.append(fe)
+
         self._update_all_edge_positions()
         self._update_primary_edge_flow_states()
         self.center_and_fit_readable()
@@ -1592,6 +1680,8 @@ class BinaryTreeRelayGraphWidget(QWidget):
             edge.update_position()
         for req in self.request_edges:
             req.update_position()
+        for fe in self.failover_edges:
+            fe.update_position()
         self.scene.update()
 
     def _update_primary_edge_flow_states(self):
@@ -1833,3 +1923,20 @@ class BinaryTreeRelayGraphWidget(QWidget):
             view=req_pane.web_view,
             callback=_on_done
         )
+    def register_failover_branch(self, exhausted_id: str, new_accounts: List[dict], remaining_files: List[str]):
+        self.set_stage_status(exhausted_id, "TOKEN_EXHAUSTED")
+        existing_ids = {w.get("id") for w in self.worker_accounts}
+        for acc in (new_accounts or []):
+            nid = acc.get("id")
+            if not nid:
+                continue
+            if nid not in existing_ids:
+                self.worker_accounts.append(acc)
+                existing_ids.add(nid)
+            self.stage_statuses_map[nid] = "WAITING"
+            if remaining_files:
+                self.assigned_files_map[nid] = list(remaining_files)
+            if not any(s == exhausted_id and d == nid for s, d, _ in self.failover_links):
+                self.failover_links.append((exhausted_id, nid, list(remaining_files or [])))
+        self.rebuild_and_layout_graph()
+        self.recompute_true_progress(f"Failover Branch Active ({len(new_accounts)} new node(s) added)")

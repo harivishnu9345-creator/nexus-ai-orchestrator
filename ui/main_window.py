@@ -1,3 +1,5 @@
+import uuid
+import shutil
 import os
 import re
 import hashlib
@@ -9,7 +11,7 @@ from PyQt6.QtWidgets import (
     QLabel, QPushButton, QLineEdit, QComboBox, QScrollArea,
     QSplitter, QTabWidget, QFileDialog, QMessageBox, QFrame,
     QTableWidget, QTableWidgetItem, QHeaderView, QInputDialog,
-    QAbstractItemView, QGraphicsView
+    QAbstractItemView, QGraphicsView, QDialog, QRadioButton, QButtonGroup, QSpinBox, QCheckBox, QListWidget, QListWidgetItem
 )
 
 from core.session_manager import SessionManager
@@ -35,6 +37,142 @@ TEMPLATE_DUMMY_FILENAMES = {
     "filename.ext", "raw_filename.ext", "filename1.ext", "filename2.ext",
     "exact_filename1", "exact_filename2", "name.ext"
 }
+
+
+class TokenExhaustFailoverDialog(QDialog):
+    """Dialog for handling Token Exhaustion: Wait for Cooldown OR Add New Account(s) & Failover."""
+
+    def __init__(self, accounts: list, master_id: str, assigned_files_map: dict, harvested_files_map: dict, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("\u26a1 If Token Exhaust - Failover & Recovery")
+        self.resize(560, 520)
+        self.setStyleSheet("""
+            QDialog { background-color: #09090b; color: #f4f4f5; }
+            QLabel { color: #f4f4f5; font-size: 12px; font-weight: bold; }
+            QComboBox, QLineEdit, QSpinBox, QListWidget {
+                background-color: #141417; color: #f4f4f5; border: 1px solid #3f3f46;
+                border-radius: 4px; padding: 5px; font-size: 12px;
+            }
+            QRadioButton { color: #e4e4e7; font-size: 12px; font-weight: bold; }
+            QPushButton {
+                background-color: #7e22ce; color: #ffffff; border: 1px solid #a855f7;
+                border-radius: 4px; padding: 7px 14px; font-weight: bold;
+            }
+            QPushButton:hover { background-color: #6b21a8; }
+        """)
+
+        self.accounts = accounts
+        self.assigned_files_map = assigned_files_map or {}
+        self.harvested_files_map = harvested_files_map or {}
+
+        lay = QVBoxLayout(self)
+        lay.setSpacing(10)
+
+        lay.addWidget(QLabel("1. Select Account Whose Tokens Exhausted (Will Turn Purple):"))
+        self.combo_exhausted = QComboBox()
+        for acc in accounts:
+            if acc.get("id") != master_id:
+                self.combo_exhausted.addItem(f"{acc.get('account_name')} ({acc.get('platform', 'claude').capitalize()})", acc.get("id"))
+        if self.combo_exhausted.count() == 0:
+            for acc in accounts:
+                self.combo_exhausted.addItem(f"{acc.get('account_name')} ({acc.get('platform', 'claude').capitalize()})", acc.get("id"))
+        self.combo_exhausted.currentIndexChanged.connect(self._refresh_remaining_files)
+        lay.addWidget(self.combo_exhausted)
+
+        lay.addWidget(QLabel("2. Choose Recovery Action:"))
+        self.grp_action = QButtonGroup(self)
+        self.rb_cooldown = QRadioButton("Option A: Mark Purple & Wait for Cooldown (Keep Current Chart)")
+        self.rb_failover = QRadioButton("Option B: Add New Account(s) Live & Failover Remaining Files via Master")
+        self.rb_failover.setChecked(True)
+        self.grp_action.addButton(self.rb_cooldown)
+        self.grp_action.addButton(self.rb_failover)
+        lay.addWidget(self.rb_cooldown)
+        lay.addWidget(self.rb_failover)
+
+        self.failover_frame = QFrame()
+        self.failover_frame.setStyleSheet("QFrame { background-color: #141417; border: 1px solid #581c87; border-radius: 6px; padding: 6px; }")
+        fl = QVBoxLayout(self.failover_frame)
+
+        row_add = QHBoxLayout()
+        row_add.addWidget(QLabel("New Accounts to Add:"))
+        self.spin_count = QSpinBox()
+        self.spin_count.setRange(1, 4)
+        self.spin_count.setValue(1)
+        row_add.addWidget(self.spin_count)
+
+        row_add.addWidget(QLabel("Platform:"))
+        self.combo_plat = QComboBox()
+        self.combo_plat.addItems(["claude", "gemini"])
+        row_add.addWidget(self.combo_plat)
+        fl.addLayout(row_add)
+
+        row_name = QHBoxLayout()
+        row_name.addWidget(QLabel("New Account Name Prefix:"))
+        self.input_prefix = QLineEdit("Failover_Claude")
+        row_name.addWidget(self.input_prefix)
+        fl.addLayout(row_name)
+
+        fl.addWidget(QLabel("Remaining Files for New Account(s) (Unfinished files pre-checked):"))
+        self.list_files = QListWidget()
+        self.list_files.setMaximumHeight(130)
+        fl.addWidget(self.list_files)
+
+        self.chk_notify_master = QCheckBox("Auto-send harvested files + continuation prompt to Master Architect")
+        self.chk_notify_master.setChecked(True)
+        fl.addWidget(self.chk_notify_master)
+
+        lay.addWidget(self.failover_frame)
+        self.rb_failover.toggled.connect(self.failover_frame.setVisible)
+
+        btn_row = QHBoxLayout()
+        btn_cancel = QPushButton("Cancel")
+        btn_cancel.setStyleSheet("background-color: #27272a; border: 1px solid #52525b;")
+        btn_cancel.clicked.connect(self.reject)
+        btn_apply = QPushButton("\u26a1 Apply Token Exhaust Recovery")
+        btn_apply.clicked.connect(self.accept)
+        btn_row.addStretch()
+        btn_row.addWidget(btn_cancel)
+        btn_row.addWidget(btn_apply)
+        lay.addLayout(btn_row)
+
+        self._refresh_remaining_files()
+
+    def _refresh_remaining_files(self):
+        self.list_files.clear()
+        aid = self.combo_exhausted.currentData()
+        if not aid:
+            return
+        assigned = self.assigned_files_map.get(aid, [])
+        harvested_names = {os.path.basename(p).lower() for p in self.harvested_files_map.get(aid, [])}
+        if not assigned:
+            it = QListWidgetItem("remaining_stage_files")
+            it.setCheckState(Qt.CheckState.Checked)
+            self.list_files.addItem(it)
+            return
+        for fn in assigned:
+            base = os.path.basename(fn.strip())
+            done = base.lower() in harvested_names
+            label = f"{base}  [Already Harvested]" if done else f"{base}  [REMAINING]"
+            it = QListWidgetItem(label)
+            it.setData(Qt.ItemDataRole.UserRole, base)
+            it.setCheckState(Qt.CheckState.Unchecked if done else Qt.CheckState.Checked)
+            self.list_files.addItem(it)
+
+    def get_result(self) -> dict:
+        rem_files = []
+        for i in range(self.list_files.count()):
+            it = self.list_files.item(i)
+            if it.checkState() == Qt.CheckState.Checked:
+                rem_files.append(it.data(Qt.ItemDataRole.UserRole) or it.text())
+        return {
+            "exhausted_id": self.combo_exhausted.currentData(),
+            "mode": "failover" if self.rb_failover.isChecked() else "cooldown",
+            "new_count": self.spin_count.value(),
+            "platform": self.combo_plat.currentText(),
+            "prefix": self.input_prefix.text().strip() or "Failover_Node",
+            "remaining_files": rem_files,
+            "notify_master": self.chk_notify_master.isChecked()
+        }
 
 
 class MainWindow(QMainWindow):
@@ -337,6 +475,11 @@ class MainWindow(QMainWindow):
         self.btn_harvest_all.clicked.connect(self._on_harvest_all_nodes)
         swarm_layout.addWidget(self.btn_harvest_all)
 
+        self.btn_token_exhaust = QPushButton("\u26a1 If Token Exhaust")
+        self.btn_token_exhaust.setStyleSheet("background-color: #7e22ce; color: #ffffff; border: 1px solid #a855f7;")
+        self.btn_token_exhaust.clicked.connect(self._open_token_exhaust_dialog)
+        swarm_layout.addWidget(self.btn_token_exhaust)
+
         self.btn_open_vscode = QPushButton("Open Build in VS Code")
         self.btn_open_vscode.clicked.connect(
             lambda: self.harvester.open_in_vscode(self.input_project_name.text().strip() or self.project_name)
@@ -454,6 +597,7 @@ class MainWindow(QMainWindow):
         self.binary_tree_graph.execution_mode_changed.connect(self._on_execution_mode_switched)
         self.binary_tree_graph.strategy_topology_changed.connect(self.mind_map_tab.set_topology_mode)
         self.binary_tree_graph.force_stage_complete.connect(self._on_worker_generation_complete)
+        self.binary_tree_graph.token_exhaust_requested.connect(self._open_token_exhaust_dialog)
 
         self.mind_map_tab.session_selected.connect(self._on_session_history_selected)
         self.binary_tree_graph.session_selected.connect(self._on_session_history_selected)
@@ -1071,35 +1215,160 @@ class MainWindow(QMainWindow):
             self.binary_tree_graph.recompute_true_progress()
 
     def _on_harvest_all_nodes(self):
+        """
+        4-Source Bulletproof Harvester (Never 0 Files + Duplicate Preservation):
+        1) Live DOM scrape of every open worker pane
+        2) Per-account harvested_stage_files cache
+        3) BinaryTreeRelayGraphWidget harvest_cache
+        4) Disk builds/<project>/_live_cache & build directory scan
+        Preserves ALL duplicate versions created across accounts in _duplicates/ and writes HARVEST_REPORT.txt.
+        """
         project_name = self.input_project_name.text().strip() or self.project_name
         master_id = self.combo_master.currentData()
-        worker_ids = [a["id"] for a in self.accounts if a["id"] != master_id] or [master_id]
+        worker_ids = [a["id"] for a in self.accounts if a["id"] != master_id] or list(self.panes.keys())
+        acc_name_map = {a["id"]: a.get("account_name", a["id"]) for a in self.accounts}
 
-        remaining = len(worker_ids)
-        all_written = []
+        versions_by_file = {}
 
-        def _on_scraped(acc_id, text):
-            nonlocal remaining
-            files = [
-                fp for fp in self.harvester.parse_and_write_files(text, project_name, acc_id)
-                if os.path.basename(fp).lower() not in TEMPLATE_DUMMY_FILENAMES
+        def _record_file(fpath: str, account_label: str):
+            if not fpath or not os.path.isfile(fpath):
+                return
+            fname = os.path.basename(fpath)
+            if fname.lower() in TEMPLATE_DUMMY_FILENAMES or fname == "HARVEST_REPORT.txt" or fname.endswith(".zip"):
+                return
+            try:
+                with open(fpath, "rb") as rf:
+                    raw_b = rf.read()
+                if len(raw_b.strip()) < 3:
+                    return
+                h = hashlib.sha256(raw_b).hexdigest()[:16]
+            except Exception:
+                return
+            key = fname.lower()
+            bucket = versions_by_file.setdefault(key, [])
+            for existing in bucket:
+                if existing["hash"] == h and existing["account"] == account_label:
+                    return
+            bucket.append({"filename": fname, "account": account_label, "path": os.path.abspath(fpath), "hash": h})
+
+        def _finalize_bundle():
+            # Source 2: harvested_stage_files
+            for aid, f_list in self.harvested_stage_files.items():
+                alabel = acc_name_map.get(aid, aid)
+                for p in f_list:
+                    _record_file(p, alabel)
+
+            # Source 3: binary_tree_graph.harvest_cache
+            if hasattr(self, "binary_tree_graph"):
+                for fname, info in getattr(self.binary_tree_graph, "harvest_cache", {}).items():
+                    _record_file(info.get("path", ""), info.get("producer_name", "GraphCache"))
+                for aid, node in getattr(self.binary_tree_graph, "node_items", {}).items():
+                    alabel = acc_name_map.get(aid, node.account_name)
+                    for _fn, p in getattr(node, "cached_files", {}).items():
+                        _record_file(p, alabel)
+
+            # Source 4: Disk _live_cache and existing build folder
+            safe_proj = re.sub(r"[^a-zA-Z0-9_-]", "_", project_name)
+            build_dir = self.harvester.get_project_build_dir(project_name)
+            os.makedirs(build_dir, exist_ok=True)
+            for scan_dir in (os.path.abspath(os.path.join("builds", safe_proj, "_live_cache")), build_dir):
+                if os.path.isdir(scan_dir):
+                    for root_d, dirs, files in os.walk(scan_dir):
+                        dirs[:] = [d for d in dirs if d != "_duplicates"]
+                        for fn in files:
+                            _record_file(os.path.join(root_d, fn), "DiskCache")
+
+            dup_dir = os.path.join(build_dir, "_duplicates")
+            written_primary = []
+            duplicate_notes = []
+            report_lines = [
+                "NEXUS AI ORCHESTRATOR - HARVEST & DUPLICATE REPORT",
+                f"Project: {project_name}",
+                f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+                "=" * 72,
+                ""
             ]
-            for fp in files:
-                self.binary_tree_graph.on_file_harvested_live(acc_id, os.path.basename(fp), fp)
-            all_written.extend(files)
-            remaining -= 1
-            if remaining == 0:
-                zip_path = self.harvester.create_project_zip(project_name)
-                self.binary_tree_graph.set_progress(100, f"Harvested {len(all_written)} files -> {os.path.basename(zip_path)}")
-                QMessageBox.information(
-                    self, "Workspace Harvested & Zipped",
-                    f"Harvested {len(all_written)} files into:\n{self.harvester.get_project_build_dir(project_name)}\n\n"
-                    f"Compiled Archive:\n{zip_path}"
-                )
 
-        for wid in worker_ids:
-            if wid in self.panes:
-                DOMScraper.scrape_page_text(self.panes[wid].get_page(), lambda txt, w=wid: _on_scraped(w, txt))
+            for _key, vers in sorted(versions_by_file.items()):
+                named_vers = [v for v in vers if v["account"] != "DiskCache"]
+                active_vers = named_vers if named_vers else vers
+                latest = active_vers[-1]
+                fname = latest["filename"]
+                dst_primary = os.path.join(build_dir, fname)
+
+                try:
+                    if os.path.abspath(latest["path"]) != os.path.abspath(dst_primary):
+                        shutil.copy2(latest["path"], dst_primary)
+                    written_primary.append(dst_primary)
+                except Exception:
+                    written_primary.append(latest["path"])
+
+                accounts_involved = []
+                for v in active_vers:
+                    if v["account"] not in accounts_involved:
+                        accounts_involved.append(v["account"])
+
+                if len(active_vers) > 1:
+                    os.makedirs(dup_dir, exist_ok=True)
+                    stem, ext = os.path.splitext(fname)
+                    for idx_v, v in enumerate(active_vers, start=1):
+                        safe_acc = re.sub(r"[^a-zA-Z0-9_-]", "_", v["account"])
+                        dup_name = f"{stem}__v{idx_v}_by_{safe_acc}{ext}"
+                        dup_dst = os.path.join(dup_dir, dup_name)
+                        try:
+                            shutil.copy2(v["path"], dup_dst)
+                        except Exception:
+                            pass
+                    note = f"DUPLICATE ({len(active_vers)}x): {fname} was created by {', '.join(accounts_involved)} (all versions saved in _duplicates/)"
+                    duplicate_notes.append(note)
+                    report_lines.append(f"[!] {note}")
+                else:
+                    report_lines.append(f"[OK] {fname}  (Created by: {latest['account']})")
+
+            report_path = os.path.join(build_dir, "HARVEST_REPORT.txt")
+            try:
+                with open(report_path, "w", encoding="utf-8") as rf:
+                    rf.write("\n".join(report_lines) + "\n")
+            except Exception:
+                pass
+
+            zip_path = self.harvester.create_project_zip(project_name)
+            self.binary_tree_graph.set_progress(100, f"Harvested {len(written_primary)} file(s) -> {os.path.basename(zip_path)}")
+
+            dup_summary = ""
+            if duplicate_notes:
+                dup_summary = "\n\nRepeated / Duplicate Files Preserved:\n" + "\n".join(f"- {n}" for n in duplicate_notes)
+
+            QMessageBox.information(
+                self,
+                "Workspace Harvested & Zipped",
+                f"Harvested {len(written_primary)} unique file(s) (with full duplicate preservation) into:\n{build_dir}\n\n"
+                f"Compiled Archive:\n{zip_path}{dup_summary}"
+            )
+
+        active_wids = [w for w in worker_ids if w in self.panes]
+        if not active_wids:
+            _finalize_bundle()
+            return
+
+        remaining = [len(active_wids)]
+        for wid in active_wids:
+            def _make_cb(acc_id=wid):
+                def _on_scraped(text):
+                    files = [
+                        fp for fp in self.harvester.parse_and_write_files(text or "", project_name, acc_id)
+                        if os.path.basename(fp).lower() not in TEMPLATE_DUMMY_FILENAMES
+                    ]
+                    alabel = acc_name_map.get(acc_id, acc_id)
+                    for fp in files:
+                        self.binary_tree_graph.on_file_harvested_live(acc_id, os.path.basename(fp), fp)
+                        _record_file(fp, alabel)
+                    remaining[0] -= 1
+                    if remaining[0] <= 0:
+                        _finalize_bundle()
+                return _on_scraped
+            DOMScraper.scrape_page_text(self.panes[wid].get_page(), _make_cb(wid))
+
 
     # ==========================================================================
     # Live On-the-Spot Code & Summary Harvester (Auto-Advances Gate on ===END_SUMMARY===)
@@ -1612,3 +1881,135 @@ class MainWindow(QMainWindow):
             return
         self._clear_current_panes()
         event.accept()
+    def _open_token_exhaust_dialog(self):
+        if not self.accounts:
+            return
+        master_id = self.combo_master.currentData()
+        dlg = TokenExhaustFailoverDialog(
+            accounts=self.accounts,
+            master_id=master_id,
+            assigned_files_map=self.assigned_files_display,
+            harvested_files_map=self.harvested_stage_files,
+            parent=self
+        )
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        res = dlg.get_result()
+        exhausted_id = res.get("exhausted_id")
+        if not exhausted_id:
+            return
+
+        self.current_node_statuses[exhausted_id] = "token_exhausted"
+        self.current_stage_statuses[exhausted_id] = "token_exhausted"
+        self.binary_tree_graph.set_stage_status(exhausted_id, "TOKEN_EXHAUSTED")
+        if hasattr(self.mind_map_tab, "mark_node_token_exhausted"):
+            self.mind_map_tab.mark_node_token_exhausted(exhausted_id)
+
+        if res["mode"] == "cooldown":
+            self._save_or_update_current_session(create_new=False)
+            self.binary_tree_graph.recompute_true_progress("Node Marked Purple (Waiting for Cooldown)")
+            QMessageBox.information(
+                self, "Token Exhausted - Cooldown Mode",
+                "The selected node is now marked PURPLE in both charts and paused for cooldown."
+            )
+            return
+
+        new_accounts = []
+        platform = res.get("platform", "claude")
+        prefix = res.get("prefix", "Failover_Claude")
+        rem_files = res.get("remaining_files", [])
+
+        for idx in range(res.get("new_count", 1)):
+            new_acc = self._dynamically_add_worker_pane(f"{prefix}_{idx + 1}", platform)
+            new_accounts.append(new_acc)
+            if rem_files:
+                self.assigned_files_display[new_acc["id"]] = list(rem_files)
+            self.current_node_statuses[new_acc["id"]] = "idle"
+            self.current_stage_statuses[new_acc["id"]] = "waiting"
+
+        self.binary_tree_graph.register_failover_branch(exhausted_id, new_accounts, rem_files)
+
+        master_acc = next((a for a in self.accounts if a["id"] == master_id), self.accounts[0])
+        self.mind_map_tab.build_mind_map(
+            master_acc, self.pipeline_worker_order, self.assigned_files_display, self.current_node_statuses
+        )
+        if hasattr(self.mind_map_tab, "mark_node_token_exhausted"):
+            self.mind_map_tab.mark_node_token_exhausted(exhausted_id)
+
+        self._save_or_update_current_session(create_new=False)
+        self.file_vault_tab.refresh_targets_and_view()
+        self.model_monitor_tab.rebuild_node_rows()
+
+        if res.get("notify_master") and master_id in self.panes:
+            exhausted_acc = next((a for a in self.accounts if a["id"] == exhausted_id), {})
+            ex_name = exhausted_acc.get("account_name", exhausted_id)
+            harvested_paths = [
+                p for p in self.harvested_stage_files.get(exhausted_id, []) if os.path.exists(p)
+            ]
+            if exhausted_id in self.binary_tree_graph.node_items:
+                for c_path in self.binary_tree_graph.node_items[exhausted_id].cached_files.values():
+                    if c_path not in harvested_paths and os.path.exists(c_path):
+                        harvested_paths.append(c_path)
+
+            new_ids_str = ", ".join(f"{a['id']} ({a['account_name']})" for a in new_accounts)
+            rem_str = ", ".join(rem_files) if rem_files else "the remaining unfinished files"
+            harv_names = ", ".join(os.path.basename(p) for p in harvested_paths) if harvested_paths else "NONE"
+
+            continuation_prompt = (
+                f"[TOKEN EXHAUSTION FAILOVER NOTICE]\n"
+                f"Worker account `{ex_name}` ({exhausted_id}) has exhausted its token limit and is paused.\n"
+                f"Files already harvested from `{ex_name}` (attached for your reference): {harv_names}.\n"
+                f"Newly added replacement worker account(s): {new_ids_str}.\n\n"
+                f"Please generate clean ===TASK_START: <new_account_id>=== ... ===TASK_END=== prompt block(s) "
+                f"for the newly added account(s) to complete ONLY the remaining files: {rem_str}.\n"
+                f"Do NOT regenerate files that were already completed."
+            )
+
+            master_pane = self.panes[master_id]
+            if harvested_paths and hasattr(self.injector, "send_multi_files"):
+                self.injector.send_multi_files(
+                    page=master_pane.get_page(),
+                    platform=master_pane.platform,
+                    prompt_text=continuation_prompt,
+                    file_paths=harvested_paths,
+                    view=master_pane.web_view
+                )
+            else:
+                self.scheduler.add_task(master_id, continuation_prompt, target_datetime=QDateTime.currentDateTime())
+
+    def _dynamically_add_worker_pane(self, account_name: str, platform: str) -> dict:
+        plat = (platform or "claude").lower()
+        acc_id = f"acc_failover_{uuid.uuid4().hex[:6]}"
+        plat_cfg = self.config.get("platforms", {}).get(plat, {})
+        start_url = plat_cfg.get("home_url", "https://claude.ai/new" if plat == "claude" else "https://gemini.google.com/app")
+
+        new_acc = {
+            "id": acc_id,
+            "account_name": account_name,
+            "platform": plat,
+            "profile_id": acc_id,
+            "current_url": start_url,
+            "last_url": start_url
+        }
+        self.accounts.append(new_acc)
+        self.pipeline_worker_order.append(new_acc)
+        self.workspace_data["accounts"] = self.accounts
+
+        default_zoom = self.config.get("app", {}).get("default_zoom", 0.75)
+        profile = self.session_mgr.get_or_create_profile(acc_id, self)
+        pane = AIPane(acc_id, account_name, plat, profile, start_url, default_zoom, self)
+        pane.url_changed.connect(self._on_pane_url_changed)
+        if hasattr(pane, "url_changed_trace"):
+            pane.url_changed_trace.connect(self._on_pane_url_changed_trace)
+        pane.move_requested.connect(self._on_move_pane_requested)
+
+        self.strip_layout.addWidget(pane)
+        self.strip_layout.setStretchFactor(pane, 1)
+        self.panes[acc_id] = pane
+        self.scheduler.register_pane(acc_id, pane, new_acc)
+
+        label = f"{account_name} ({plat.capitalize()})"
+        self.combo_target.addItem(label, acc_id)
+        self.combo_master.addItem(label, acc_id)
+        return new_acc
